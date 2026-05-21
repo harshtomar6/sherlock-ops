@@ -47,6 +47,7 @@ export class AnthropicProvider implements LLMProvider {
       content: resp.content.map(fromAnthropicBlock).filter((b): b is AssistantContentBlock => b !== null),
       stopReason: mapStopReason(resp.stop_reason),
       usage: { inputTokens: resp.usage.input_tokens, outputTokens: resp.usage.output_tokens },
+      model: resp.model,
     };
   }
 }

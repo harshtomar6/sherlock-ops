@@ -32,6 +32,8 @@ export interface ChatResponse {
   content: AssistantContentBlock[];
   stopReason: "end" | "tool_use" | "max_tokens" | "other";
   usage?: { inputTokens: number; outputTokens: number };
+  /** Model id the provider actually used (Anthropic and OpenAI both echo this back). */
+  model?: string;
 }
 
 export interface LLMProvider {

@@ -23,7 +23,12 @@ export function buildPm2Tools(resolver: HostResolver): Tool[] {
         if (r.exitCode !== 0) throw new Error(`pm2 jlist failed (${r.exitCode}): ${r.stderr || r.stdout}`);
         const start = r.stdout.indexOf("[");
         const raw = JSON.parse(start >= 0 ? r.stdout.slice(start) : r.stdout) as Pm2RawProc[];
-        return { host: host ?? "local", processes: raw.map(summarize) };
+        return {
+          command: "pm2 jlist",
+          exitCode: r.exitCode,
+          host: host ?? "local",
+          processes: raw.map(summarize),
+        };
       },
     }),
 
@@ -39,7 +44,7 @@ export function buildPm2Tools(resolver: HostResolver): Tool[] {
         const raw = JSON.parse(start >= 0 ? r.stdout.slice(start) : r.stdout) as Pm2RawProc[];
         const proc = raw.find((p) => p.name === process || String(p.pm_id) === process);
         if (!proc) throw new Error(`process not found: ${process}`);
-        return describe(proc);
+        return { command: `pm2 jlist | filter ${process}`, exitCode: r.exitCode, ...describe(proc) };
       },
     }),
 
@@ -59,7 +64,13 @@ export function buildPm2Tools(resolver: HostResolver): Tool[] {
         if (stream === "out") args.push("--out");
         const r = await resolver.resolve(host as string | undefined).exec({ command: "pm2", args, timeoutMs: 15_000 });
         if (r.exitCode !== 0 && !r.stdout) throw new Error(`pm2 logs failed: ${r.stderr || "unknown error"}`);
-        return { logs: r.stdout, truncated: r.truncated };
+        return {
+          command: `pm2 ${args.join(" ")}`,
+          exitCode: r.exitCode,
+          stdout: r.stdout,
+          logs: r.stdout,
+          truncated: r.truncated,
+        };
       },
     }),
 
@@ -111,10 +122,11 @@ async function runPm2(
   resolver: HostResolver,
   host: string | undefined,
   args: string[],
-): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+): Promise<{ command: string; exitCode: number; stdout: string; stderr: string }> {
+  const command = `pm2 ${args.join(" ")}`;
   const r = await resolver.resolve(host).exec({ command: "pm2", args });
-  if (r.exitCode !== 0) throw new Error(`pm2 ${args.join(" ")} failed (${r.exitCode}): ${r.stderr || r.stdout}`);
-  return { exitCode: r.exitCode, stdout: r.stdout, stderr: r.stderr };
+  if (r.exitCode !== 0) throw new Error(`${command} failed (${r.exitCode}): ${r.stderr || r.stdout}`);
+  return { command, exitCode: r.exitCode, stdout: r.stdout, stderr: r.stderr };
 }
 
 interface ProcSummary {

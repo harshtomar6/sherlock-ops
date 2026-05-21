@@ -62,6 +62,14 @@ export class Orchestrator {
 
     let lastAssistantText = "";
     let hitMax = false;
+    let toolSeq = 0;
+
+    // Aggregated observability across the loop.
+    let totalInputTokens = 0;
+    let totalOutputTokens = 0;
+    let iterations = 0;
+    let llmModel: string | undefined;
+    let finalStopReason: string | undefined;
 
     for (let i = 0; i < this.maxIterations; i++) {
       const resp = await this.llm.chat({
@@ -70,6 +78,13 @@ export class Orchestrator {
         tools: toolDefs,
       });
       messages.push({ role: "assistant", content: resp.content });
+      iterations++;
+      if (resp.usage) {
+        totalInputTokens += resp.usage.inputTokens;
+        totalOutputTokens += resp.usage.outputTokens;
+      }
+      if (resp.model && !llmModel) llmModel = resp.model;
+      finalStopReason = resp.stopReason;
 
       lastAssistantText = textOf(resp.content);
 
@@ -79,30 +94,35 @@ export class Orchestrator {
 
       if (toolCalls.length === 0 || resp.stopReason === "end") {
         this.persist(req, ctx, messages, historyEnd);
-        return { text: lastAssistantText || "(no response)" };
+        return {
+          text: lastAssistantText || "(no response)",
+          meta: { llmModel, inputTokens: totalInputTokens, outputTokens: totalOutputTokens, iterations, finalStopReason },
+        };
       }
 
       const results: UserContentBlock[] = await Promise.all(
-        toolCalls.map((call) => this.runOne(call, broker, ctx, lastAssistantText)),
+        toolCalls.map((call) => this.runOne(call, broker, ctx, lastAssistantText, toolSeq++)),
       );
       messages.push({ role: "user", content: results });
 
       if (i === this.maxIterations - 1) hitMax = true;
     }
 
-    // MAX_ITERATIONS hit. Append a synthetic assistant turn so saved history
-    // always ends on assistant (otherwise next turn's LLM sees an orphan
-    // tool_result chain).
     if (hitMax) {
       const note = `(investigation stopped — reached ${this.maxIterations} tool iterations without a final answer)`;
       messages.push({ role: "assistant", content: [{ type: "text", text: note }] });
       this.persist(req, ctx, messages, historyEnd);
-      return { text: note };
+      return {
+        text: note,
+        meta: { llmModel, inputTokens: totalInputTokens, outputTokens: totalOutputTokens, iterations, finalStopReason: "max_iterations" },
+      };
     }
 
-    // Should be unreachable, but be safe.
     this.persist(req, ctx, messages, historyEnd);
-    return { text: lastAssistantText || "(no response)" };
+    return {
+      text: lastAssistantText || "(no response)",
+      meta: { llmModel, inputTokens: totalInputTokens, outputTokens: totalOutputTokens, iterations, finalStopReason },
+    };
   }
 
   private persist(
@@ -131,6 +151,7 @@ export class Orchestrator {
     broker: ApprovalBroker,
     ctx: OrchestratorContext,
     rationale: string,
+    seq: number,
   ): Promise<UserContentBlock> {
     const tool = this.registry.get(call.name);
     if (!tool) {
@@ -173,6 +194,7 @@ export class Orchestrator {
       if (!decision.approved) {
         ctx.audit?.recordToolCall({
           requestId: ctx.requestId ?? "",
+          seq,
           name: tool.name,
           scope,
           host,
@@ -195,6 +217,7 @@ export class Orchestrator {
       const durationMs = Date.now() - startedAt;
       ctx.audit?.recordToolCall({
         requestId: ctx.requestId ?? "",
+        seq,
         name: tool.name,
         scope,
         host,
@@ -214,6 +237,7 @@ export class Orchestrator {
       const msg = err instanceof Error ? err.message : String(err);
       ctx.audit?.recordToolCall({
         requestId: ctx.requestId ?? "",
+        seq,
         name: tool.name,
         scope,
         host,

@@ -18,6 +18,14 @@ export interface Request {
 export interface Response {
   text: string;
   blocks?: ResponseBlock[];
+  /** Observability metadata — populated by the Orchestrator, consumed by the Gateway audit. */
+  meta?: {
+    llmModel?: string;
+    inputTokens?: number;
+    outputTokens?: number;
+    iterations?: number;
+    finalStopReason?: string;
+  };
 }
 
 export type ResponseBlock =

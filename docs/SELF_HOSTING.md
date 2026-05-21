@@ -415,25 +415,73 @@ ORDER BY id;
 The audit DB defaults to `./sherlock-audit.sqlite` next to the control plane.
 Override with `SHERLOCK_AUDIT_DB=/var/lib/sherlock-ops/audit.sqlite`.
 
-**Useful queries:**
+### Real-time observability
+
+Every tool call, approval request, and decision is also emitted as a structured
+JSON line to stdout. Tail it with journalctl + jq:
+
+```bash
+journalctl -u sherlock-ops -f -o cat | jq -c 'select(.audit)'
+```
+
+Sample output during an investigation:
+
+```json
+{"audit":"request","request_id":"abc-…","user":"slack:U01ABC","source":"slack","text":"why is api-server restarting?"}
+{"audit":"tool_call","request_id":"abc-…","seq":0,"name":"pm2_list","host":"api-prod-1","scope":"read","ok":true,"command":"pm2 jlist","exit_code":0,"duration_ms":42}
+{"audit":"tool_call","request_id":"abc-…","seq":1,"name":"pm2_logs","host":"api-prod-1","scope":"read","ok":true,"command":"pm2 logs api-server --lines 200 --nostream --raw --err","exit_code":0,"duration_ms":118}
+{"audit":"approval_requested","approval_id":"…","request_id":"abc-…","tool":"pm2_restart","scope":"mutate"}
+{"audit":"approval_decided","approval_id":"…","approved":true,"decided_by":"slack:U01ABC"}
+{"audit":"tool_call","request_id":"abc-…","seq":2,"name":"pm2_restart","host":"api-prod-1","scope":"mutate","ok":true,"command":"pm2 restart api-server","exit_code":0,"duration_ms":1820}
+{"audit":"response","request_id":"abc-…","ok":true,"duration_ms":5234,"llm_model":"claude-opus-4-7","input_tokens":12480,"output_tokens":520,"iterations":3,"final_stop_reason":"end"}
+```
+
+### Useful queries
 
 ```sql
--- Recent activity
-SELECT at, name, scope, host, ok, duration_ms
-FROM tool_calls ORDER BY at DESC LIMIT 50;
+-- The 20 most recent tool calls with the actual command run
+SELECT at, name, host, command_preview AS cmd, exit_code, ok, duration_ms
+FROM tool_calls ORDER BY at DESC LIMIT 20;
 
--- Who has approved what
-SELECT a.decided_at, a.tool_name, a.scope, a.decided_by, a.approved
-FROM approvals a
-WHERE a.decided_at IS NOT NULL
-ORDER BY a.decided_at DESC;
+-- Every shell command ever run, by host
+SELECT at, host, command_preview, exit_code, output_truncated
+FROM tool_calls WHERE name = 'shell_exec' ORDER BY at DESC;
 
--- Top users by request count
-SELECT user, COUNT(*) AS n
-FROM requests GROUP BY user ORDER BY n DESC;
+-- Full transcript of one request — what the user asked + every tool call + response
+SELECT 'request' AS kind, at, text AS payload, NULL AS extra FROM requests WHERE id = :rid
+UNION ALL
+SELECT 'tool ' || seq, at, name || ' → ' || COALESCE(command_preview, ''),
+       'exit=' || COALESCE(exit_code, 'n/a') || ' ok=' || ok FROM tool_calls WHERE request_id = :rid
+UNION ALL
+SELECT 'response', completed_at, response_text, 'tokens=' || COALESCE(input_tokens,0) || '/' || COALESCE(output_tokens,0)
+FROM requests WHERE id = :rid
+ORDER BY at;
 
--- Failed commands in the last 24h
-SELECT at, name, host, error
+-- Stdout of the last failed shell_exec
+SELECT command_preview, exit_code, stdout_preview, stderr_preview
+FROM tool_calls
+WHERE name = 'shell_exec' AND ok = 0
+ORDER BY at DESC LIMIT 1;
+
+-- Who approved what
+SELECT a.decided_at, a.tool_name, a.scope, a.decided_by, a.approved, a.reason
+FROM approvals a WHERE a.decided_at IS NOT NULL ORDER BY a.decided_at DESC;
+
+-- Token spend per user, last 7 days
+SELECT user, COUNT(*) AS requests,
+       SUM(input_tokens)  AS input_tokens,
+       SUM(output_tokens) AS output_tokens
+FROM requests
+WHERE at > datetime('now', '-7 days')
+GROUP BY user
+ORDER BY input_tokens DESC;
+
+-- LLM iterations distribution — high values may indicate the bot is thrashing
+SELECT iterations, COUNT(*) FROM requests
+WHERE iterations IS NOT NULL GROUP BY iterations ORDER BY iterations;
+
+-- Failed tool calls in the last 24h, with the actual error
+SELECT at, name, host, command_preview, error
 FROM tool_calls
 WHERE ok = 0 AND at > datetime('now', '-1 day')
 ORDER BY at DESC;

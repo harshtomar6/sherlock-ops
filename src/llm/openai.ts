@@ -87,6 +87,7 @@ export class OpenAIProvider implements LLMProvider {
       usage: data.usage
         ? { inputTokens: data.usage.prompt_tokens, outputTokens: data.usage.completion_tokens }
         : undefined,
+      model: data.model,
     };
   }
 }
@@ -180,6 +181,7 @@ interface OpenAIToolCall {
 }
 
 interface OpenAIResponse {
+  model?: string;
   choices: Array<{ message: OpenAIResponseMessage; finish_reason: string | null }>;
   usage?: { prompt_tokens: number; completion_tokens: number };
 }

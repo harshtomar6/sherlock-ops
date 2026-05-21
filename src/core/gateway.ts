@@ -36,7 +36,15 @@ export class Gateway {
     try {
       const resp = await this.orchestrator.handle(req, { audit: this.audit, requestId });
       if (requestId) {
-        this.audit?.recordResponse(requestId, { text: resp.text, durationMs: Date.now() - startedAt });
+        this.audit?.recordResponse(requestId, {
+          text: resp.text,
+          durationMs: Date.now() - startedAt,
+          llmModel: resp.meta?.llmModel,
+          inputTokens: resp.meta?.inputTokens,
+          outputTokens: resp.meta?.outputTokens,
+          iterations: resp.meta?.iterations,
+          finalStopReason: resp.meta?.finalStopReason,
+        });
       }
       return resp;
     } catch (err) {
