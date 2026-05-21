@@ -366,6 +366,50 @@ persists the audit DB on a named volume.
 The agent will be rejected with the old token (good — confirms rotation
 worked). It will reconnect cleanly once both sides have the new token.
 
+## Conversation history
+
+Each Slack thread is a continuous conversation — follow-ups in the same
+thread see prior turns, tool results, and the bot's reasoning. So this works
+naturally:
+
+```
+You: @Sherlock list pm2 processes on api-prod-1
+Bot: <table of processes>
+You: now check why the second one keeps restarting
+Bot: (knows what "the second one" refers to from prior turn)
+You: restart it
+Bot: (proposes pm2_restart with the right process name, asks for approval)
+```
+
+**Knobs (in `.env`):**
+
+- `CONVERSATION_MAX_EXCHANGES` (default `10`) — how many recent user-messages
+  worth of history to reload on each turn. One "exchange" includes the user
+  message plus every tool round-trip the bot did to answer it.
+- `CONVERSATION_TTL_HOURS` (default `24`) — drop history older than this when
+  loading. A thread reactivated after the TTL starts fresh.
+
+**Resetting context:** start a new Slack thread. Each `conversationId` is
+`slack:<channel>:<threadTs>`, so a new thread = clean state.
+
+**Storage:** history rows live in the same SQLite file as the audit log
+(table `conversation_turns`). Periodically pruned automatically when
+`ConversationStore.prune()` runs; you can also do this from cron:
+
+```bash
+sqlite3 /var/lib/sherlock-ops/audit.sqlite \
+  "DELETE FROM conversation_turns WHERE at < datetime('now', '-7 days'); VACUUM;"
+```
+
+**Inspect a thread's history:**
+
+```sql
+SELECT at, role, substr(content, 1, 120) AS preview
+FROM conversation_turns
+WHERE conversation_id = 'slack:C0123ABCD:1716302400.001234'
+ORDER BY id;
+```
+
 ## Audit log: retention, backups, queries
 
 The audit DB defaults to `./sherlock-audit.sqlite` next to the control plane.

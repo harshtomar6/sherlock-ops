@@ -136,17 +136,16 @@ function promptBlocks(id: string, req: ApprovalRequest) {
       elements: [
         {
           type: "button",
-          action_id: "sherlock_approval",
+          // action_id must be unique within a message — encode verb + id directly.
+          action_id: `sherlock_approval:approve:${id}`,
           text: { type: "plain_text", text: "Approve" },
           style: "primary",
-          value: `approve:${id}`,
         },
         {
           type: "button",
-          action_id: "sherlock_approval",
+          action_id: `sherlock_approval:deny:${id}`,
           text: { type: "plain_text", text: "Deny" },
           style: "danger",
-          value: `deny:${id}`,
         },
       ],
     },

@@ -62,11 +62,13 @@ export class SlackAdapter {
     });
 
     this.app.action<BlockAction<ButtonAction>>(
-      "sherlock_approval",
+      /^sherlock_approval:/,
       async ({ ack, action, body, client }) => {
         await ack();
-        const value = action.value ?? "";
-        const [verb, id] = value.split(":", 2);
+        // action_id is "sherlock_approval:<verb>:<uuid>"
+        const parts = action.action_id.split(":");
+        if (parts.length !== 3) return;
+        const [, verb, id] = parts;
         if (!id || (verb !== "approve" && verb !== "deny")) return;
         const decidedBy = `slack:${body.user.id}`;
         await this.approvals.decide(id, verb === "approve", decidedBy, client);

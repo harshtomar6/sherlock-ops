@@ -8,6 +8,7 @@ import type {
 import { effectiveScope, type Tool, type ToolScope } from "../tools/types.js";
 import type { ApprovalBroker, ApprovalDecision } from "./approval.js";
 import { DenyAllBroker } from "./approval.js";
+import type { ConversationStore } from "./conversationStore.js";
 import type { ToolRegistry } from "./registry.js";
 import type { Request, Response } from "./types.js";
 
@@ -20,6 +21,7 @@ Operating principles:
 - Be concise. Report the finding, then the evidence. Use code blocks for log excerpts.
 - If a tool fails or returns no useful info, say so plainly. Don't speculate.
 - Some tools (pm2_restart, pm2_stop, shell_exec with non-allowlisted commands) require human approval. Explain *why* you want to run them in your message text right before the tool call — the approver sees this rationale.
+- Conversations can span multiple messages in the same Slack thread. Prior turns and tool results are visible to you — use them. Don't re-investigate something you already established earlier in the thread.
 - Only use tools you have been given. Do not invent commands.`;
 
 const MAX_TOOL_ITERATIONS = 10;
@@ -28,6 +30,7 @@ export interface OrchestratorOpts {
   llm: LLMProvider;
   registry: ToolRegistry;
   maxIterations?: number;
+  conversations?: ConversationStore;
 }
 
 export interface OrchestratorContext {
@@ -39,19 +42,26 @@ export class Orchestrator {
   private llm: LLMProvider;
   private registry: ToolRegistry;
   private maxIterations: number;
+  private conversations?: ConversationStore;
 
   constructor(opts: OrchestratorOpts) {
     this.llm = opts.llm;
     this.registry = opts.registry;
     this.maxIterations = opts.maxIterations ?? MAX_TOOL_ITERATIONS;
+    this.conversations = opts.conversations;
   }
 
   async handle(req: Request, ctx: OrchestratorContext = {}): Promise<Response> {
-    const messages: ProviderMessage[] = [{ role: "user", content: req.text }];
+    const history = this.conversations?.load(req.conversationId) ?? [];
+    const messages: ProviderMessage[] = [...history];
+    const historyEnd = messages.length; // new messages from this turn start here
+    messages.push({ role: "user", content: req.text });
+
     const toolDefs = this.registry.toProviderDefs();
     const broker = req.approvalBroker ?? new DenyAllBroker();
 
     let lastAssistantText = "";
+    let hitMax = false;
 
     for (let i = 0; i < this.maxIterations; i++) {
       const resp = await this.llm.chat({
@@ -68,6 +78,7 @@ export class Orchestrator {
       );
 
       if (toolCalls.length === 0 || resp.stopReason === "end") {
+        this.persist(req, ctx, messages, historyEnd);
         return { text: lastAssistantText || "(no response)" };
       }
 
@@ -75,9 +86,44 @@ export class Orchestrator {
         toolCalls.map((call) => this.runOne(call, broker, ctx, lastAssistantText)),
       );
       messages.push({ role: "user", content: results });
+
+      if (i === this.maxIterations - 1) hitMax = true;
     }
 
-    return { text: `Stopped after ${this.maxIterations} tool iterations without a final answer.` };
+    // MAX_ITERATIONS hit. Append a synthetic assistant turn so saved history
+    // always ends on assistant (otherwise next turn's LLM sees an orphan
+    // tool_result chain).
+    if (hitMax) {
+      const note = `(investigation stopped — reached ${this.maxIterations} tool iterations without a final answer)`;
+      messages.push({ role: "assistant", content: [{ type: "text", text: note }] });
+      this.persist(req, ctx, messages, historyEnd);
+      return { text: note };
+    }
+
+    // Should be unreachable, but be safe.
+    this.persist(req, ctx, messages, historyEnd);
+    return { text: lastAssistantText || "(no response)" };
+  }
+
+  private persist(
+    req: Request,
+    ctx: OrchestratorContext,
+    messages: ProviderMessage[],
+    historyEnd: number,
+  ): void {
+    if (!this.conversations || !ctx.requestId) return;
+    const newMessages = messages.slice(historyEnd);
+    if (newMessages.length === 0) return;
+    try {
+      this.conversations.save(req.conversationId, ctx.requestId, newMessages);
+    } catch (err) {
+      console.error(JSON.stringify({
+        component: "orchestrator",
+        event: "conversation_save_failed",
+        conversationId: req.conversationId,
+        error: err instanceof Error ? err.message : String(err),
+      }));
+    }
   }
 
   private async runOne(

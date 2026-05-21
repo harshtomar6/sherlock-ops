@@ -46,6 +46,10 @@ export interface Config {
   localShellAllowlist: string[];
   /** Path to SQLite file. */
   auditDbPath: string;
+  /** Max past Slack exchanges to load into context on each turn. */
+  conversationMaxExchanges: number;
+  /** Drop history older than this on load. */
+  conversationTtlHours: number;
 }
 
 export function loadConfig(): Config {
@@ -63,7 +67,16 @@ export function loadConfig(): Config {
       ? process.env.LOCAL_SHELL_ALLOWLIST.split(",").map((s) => s.trim()).filter(Boolean)
       : [],
     auditDbPath: process.env.SHERLOCK_AUDIT_DB ?? "sherlock-audit.sqlite",
+    conversationMaxExchanges: parsePositiveInt(process.env.CONVERSATION_MAX_EXCHANGES, 10),
+    conversationTtlHours: parsePositiveInt(process.env.CONVERSATION_TTL_HOURS, 24),
   };
+}
+
+function parsePositiveInt(raw: string | undefined, fallback: number): number {
+  if (!raw) return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return Math.floor(n);
 }
 
 function loadLlmConfig(): LlmCfg {

@@ -10,6 +10,7 @@ reads the right logs, and tells you what it found.
 ## What it does
 
 - **Investigates in plain English.** Ask in Slack, get a focused answer with evidence.
+- **Conversational follow-ups.** Each Slack thread is a continuous conversation — prior turns and tool results stay in context.
 - **Manages PM2 across a fleet.** List, describe, tail logs, restart, stop, start, reload, delete.
 - **Runs shell commands safely.** Per-host allowlist for routine diagnostics; everything else needs human approval.
 - **Approval in-thread.** Interactive Approve/Deny buttons in Slack for any mutating or non-allowlisted call.

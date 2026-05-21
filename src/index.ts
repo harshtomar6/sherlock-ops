@@ -2,6 +2,7 @@ import { SlackAdapter } from "./adapters/slack.js";
 import { AuditStore } from "./audit/store.js";
 import { loadConfig, type LlmCfg } from "./config.js";
 import { AgentHub } from "./controlplane/agentHub.js";
+import { ConversationStore } from "./core/conversationStore.js";
 import { Gateway } from "./core/gateway.js";
 import { Orchestrator } from "./core/orchestrator.js";
 import { ToolRegistry } from "./core/registry.js";
@@ -32,6 +33,11 @@ async function main(): Promise<void> {
   const cfg = loadConfig();
   const llm = buildLlm(cfg.llm);
   const audit = new AuditStore(cfg.auditDbPath);
+  const conversations = new ConversationStore({
+    dbPath: cfg.auditDbPath,
+    maxExchanges: cfg.conversationMaxExchanges,
+    ttlHours: cfg.conversationTtlHours,
+  });
 
   let hub: AgentHub | undefined;
   let resolver: HostResolver;
@@ -55,7 +61,7 @@ async function main(): Promise<void> {
   registry.registerAll(buildPm2Tools(resolver));
   registry.registerAll(buildShellTools(resolver));
 
-  const orchestrator = new Orchestrator({ llm, registry });
+  const orchestrator = new Orchestrator({ llm, registry, conversations });
   const gateway = new Gateway({ orchestrator, audit, allowedUsers: cfg.allowedUsers });
 
   const slack = new SlackAdapter({
@@ -76,12 +82,15 @@ async function main(): Promise<void> {
       tools: registry.toProviderDefs().map((t) => t.name),
       hubPort: cfg.hostsCfg?.port,
       auditDb: cfg.auditDbPath,
+      conversationMaxExchanges: cfg.conversationMaxExchanges,
+      conversationTtlHours: cfg.conversationTtlHours,
     }),
   );
 
   const shutdown = async () => {
     console.log(JSON.stringify({ event: "shutting_down" }));
     if (hub) await hub.close();
+    conversations.close();
     audit.close();
     process.exit(0);
   };
