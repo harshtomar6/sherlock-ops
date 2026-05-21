@@ -222,14 +222,36 @@ Or use systemd — see [deploy/systemd/sherlock-ops.service](../deploy/systemd/s
 
    Lock the file down: `chmod 600 hosts.json && chown sherlock:sherlock hosts.json`.
 
-4. Install the systemd unit:
+4. Install the systemd unit using the install script (handles user
+   creation, file perms, node path detection, and state directory):
 
    ```bash
+   sudo bash deploy/install-control-plane.sh
+   ```
+
+   The script is idempotent — re-run it after any config change.
+
+   If you'd rather do it by hand:
+
+   ```bash
+   # 1. Create the service user
+   sudo useradd --system --no-create-home --shell /usr/sbin/nologin sherlock
+
+   # 2. Lock down secrets
+   sudo chown -R sherlock:sherlock /opt/sherlock-ops/{dist,node_modules,.env}
+   sudo chmod 600 /opt/sherlock-ops/.env /opt/sherlock-ops/hosts.json
+
+   # 3. Verify Node is at /usr/bin/node (otherwise edit ExecStart in the unit)
+   which node
+
+   # 4. Install + start
    sudo cp deploy/systemd/sherlock-ops.service /etc/systemd/system/
    sudo systemctl daemon-reload
    sudo systemctl enable --now sherlock-ops
-   sudo systemctl status sherlock-ops
    ```
+
+   The unit uses `StateDirectory=sherlock-ops`, so systemd auto-creates
+   `/var/lib/sherlock-ops` with correct ownership. No manual mkdir needed.
 
 5. Verify the hub is listening:
 
@@ -260,9 +282,11 @@ chmod 600 .env
 Install the systemd unit:
 
 ```bash
-sudo cp deploy/systemd/sherlock-agent.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now sherlock-agent
+# Set SERVICE_USER to whoever owns the PM2 daemon you want to manage
+# (e.g. SERVICE_USER=deploy bash deploy/install-agent.sh). The script auto-detects
+# from ~/.pm2 ownership if you don't set it.
+sudo bash deploy/install-agent.sh
+
 sudo journalctl -u sherlock-agent -f
 # look for: {"component":"sherlock_agent","event":"welcomed",...}
 ```
@@ -511,6 +535,41 @@ needed. If clicks have no effect:
 1. App manifest has `interactivity.is_enabled: true`? (yes by default in the manifest above)
 2. App reinstalled after manifest changes? (Slack requires this when scopes change)
 3. Control plane logs show the action event? (`audit` entry should appear)
+
+### systemd: `Failed at step NAMESPACE` or `status=226/NAMESPACE`
+
+The unit's `User=`, `WorkingDirectory=`, or a sandboxed path doesn't exist
+yet. Common causes:
+
+```
+Failed to set up mount namespacing: /var/lib/sherlock-ops: No such file or directory
+```
+
+→ You're on an older copy of the unit that used `ReadWritePaths=`. The current
+unit uses `StateDirectory=sherlock-ops` which auto-creates the path. Pull the
+latest, then:
+
+```bash
+sudo cp deploy/systemd/sherlock-ops.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl restart sherlock-ops
+```
+
+```
+Failed to determine user credentials: User sherlock not found
+```
+
+→ The service user doesn't exist. Run the install script
+(`sudo bash deploy/install-control-plane.sh`) or create the user manually
+(`sudo useradd --system --no-create-home --shell /usr/sbin/nologin sherlock`).
+
+```
+Failed at step EXEC spawning /usr/bin/node: No such file or directory
+```
+
+→ Node isn't at `/usr/bin/node`. Find it with `which node` and edit
+`ExecStart=` in `/etc/systemd/system/sherlock-ops.service` (or re-run the
+install script, which detects the right path).
 
 ### `pm2_list failed` but `pm2 ls` works on the host
 

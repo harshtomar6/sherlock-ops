@@ -10,33 +10,42 @@ User=sherlock
 Group=sherlock
 WorkingDirectory=/opt/sherlock-ops
 
+# Auto-creates /var/lib/sherlock-ops with the right owner/perms and sets
+# $STATE_DIRECTORY. No manual mkdir/chown needed.
+StateDirectory=sherlock-ops
+StateDirectoryMode=0750
+
 # Load secrets from .env (mode 0600, owned by sherlock:sherlock).
 EnvironmentFile=/opt/sherlock-ops/.env
 Environment=NODE_ENV=production
 Environment=SHERLOCK_AUDIT_DB=/var/lib/sherlock-ops/audit.sqlite
 
+# /usr/bin/node is the apt / NodeSource default on Debian/Ubuntu.
+# If you installed Node a different way (nvm, /usr/local/bin/node, …) update this:
+#   sudo systemctl edit sherlock-ops
+#   [Service]
+#   ExecStart=
+#   ExecStart=/path/to/node dist/index.js
 ExecStart=/usr/bin/node dist/index.js
-ExecReload=/bin/kill -HUP $MAINPID
 KillSignal=SIGTERM
 TimeoutStopSec=20
 
 Restart=on-failure
 RestartSec=5
 
-# Hardening
+# Hardening — locked down but compatible with Node's JIT.
+# NOTE: MemoryDenyWriteExecute is deliberately NOT set — V8's JIT needs W+X memory.
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 PrivateDevices=true
-ReadWritePaths=/var/lib/sherlock-ops
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
 RestrictNamespaces=true
 LockPersonality=true
-MemoryDenyWriteExecute=true
 SystemCallFilter=@system-service
 SystemCallErrorNumber=EPERM
 
