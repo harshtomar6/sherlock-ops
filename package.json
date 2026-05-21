@@ -1,0 +1,28 @@
+{
+  "name": "sherlock-ops",
+  "version": "0.0.1",
+  "description": "AI-powered ops bot for PM2, logs, and shell — Slack-first, multi-interface.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p .",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.40.0",
+    "@slack/bolt": "^4.1.0",
+    "dotenv": "^16.4.5",
+    "zod": "^3.23.8",
+    "zod-to-json-schema": "^3.23.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}
