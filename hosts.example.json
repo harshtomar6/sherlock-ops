@@ -1,0 +1,30 @@
+{
+  "port": 8787,
+  "path": "/agent",
+  "hosts": [
+    {
+      "id": "api-prod-1",
+      "token": "CHANGE_ME_to_a_long_random_secret",
+      "shellAllowlist": [
+        "df -h",
+        "free -m",
+        "uptime",
+        "top -bn1",
+        "ps aux",
+        "journalctl -u nginx",
+        "journalctl -u sherlock-agent",
+        "cat /proc/loadavg",
+        "ss -tunlp"
+      ]
+    },
+    {
+      "id": "api-prod-2",
+      "token": "CHANGE_ME_to_another_long_random_secret",
+      "shellAllowlist": [
+        "df -h",
+        "free -m",
+        "uptime"
+      ]
+    }
+  ]
+}

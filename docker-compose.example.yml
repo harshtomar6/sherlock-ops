@@ -1,0 +1,29 @@
+# Copy to docker-compose.yml and edit before running.
+#
+# This file deploys the *control plane* in a container. Agents stay on bare-metal
+# target hosts because they need to talk to the host's PM2 daemon — putting the
+# agent in a container would mean either bind-mounting the PM2 socket (fragile)
+# or running PM2 inside the same container as your app (not how PM2 is meant to work).
+
+services:
+  sherlock-ops:
+    build: .
+    image: sherlock-ops:local
+    container_name: sherlock-ops
+    restart: unless-stopped
+    # Mount config files read-only.
+    volumes:
+      - ./hosts.json:/app/hosts.json:ro
+      - sherlock-audit:/var/lib/sherlock-ops
+    env_file:
+      - .env
+    # Expose only on localhost; put a TLS proxy in front of this for agents.
+    # If your agents are on the same network, you can publish 8787 directly.
+    ports:
+      - "127.0.0.1:8787:8787"
+    # If you put a reverse proxy on the same docker network, comment out
+    # the ports section above and let the proxy reach the container by name.
+
+volumes:
+  sherlock-audit:
+    name: sherlock-ops-audit

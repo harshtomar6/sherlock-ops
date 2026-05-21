@@ -1,3 +1,5 @@
+import type { ApprovalBroker } from "./approval.js";
+
 /**
  * Interface-agnostic shapes. Adapters (Slack/CLI/Web) translate native
  * events into Request; orchestrator returns Response; adapters render it.
@@ -8,6 +10,8 @@ export interface Request {
   userId: string;          // adapter-namespaced (e.g. "slack:U123ABC")
   conversationId: string;  // thread/session key
   text: string;
+  /** Optional — present when the interface supports interactive approval. */
+  approvalBroker?: ApprovalBroker;
   context?: Record<string, unknown>;
 }
 

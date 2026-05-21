@@ -1,0 +1,40 @@
+[Unit]
+Description=sherlock-agent (target-host daemon)
+Documentation=https://github.com/your-org/sherlock-ops
+After=network-online.target pm2-sherlock.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# IMPORTANT: run as the user that owns the PM2 daemon you want to manage.
+# If your app runs under `pm2` as user `deploy`, set User=deploy here.
+# Otherwise pm2_list / pm2_logs will return data for the wrong user's PM2.
+User=deploy
+Group=deploy
+
+WorkingDirectory=/opt/sherlock-agent
+EnvironmentFile=/opt/sherlock-agent/.env
+Environment=NODE_ENV=production
+
+ExecStart=/usr/bin/node dist/agent/index.js
+KillSignal=SIGTERM
+TimeoutStopSec=10
+
+Restart=on-failure
+RestartSec=5
+
+# Hardening — the agent only needs network out + ability to run commands.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

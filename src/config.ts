@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve as resolvePath } from "node:path";
 import "dotenv/config";
 
 export type LlmProviderKind = "anthropic" | "openai";
@@ -18,6 +20,18 @@ export interface OpenAICfg {
 
 export type LlmCfg = AnthropicCfg | OpenAICfg;
 
+export interface HostEntry {
+  id: string;
+  token: string;
+  shellAllowlist?: string[];
+}
+
+export interface HostsCfg {
+  port: number;
+  path: string;
+  hosts: HostEntry[];
+}
+
 export interface Config {
   slack: {
     botToken: string;
@@ -26,6 +40,12 @@ export interface Config {
   };
   llm: LlmCfg;
   allowedUsers: Set<string> | undefined;
+  /** undefined ⇒ single-host (LocalExecutor only). */
+  hostsCfg: HostsCfg | undefined;
+  /** Local-mode shell allowlist (single-host only). Multi-host uses per-host allowlists. */
+  localShellAllowlist: string[];
+  /** Path to SQLite file. */
+  auditDbPath: string;
 }
 
 export function loadConfig(): Config {
@@ -38,6 +58,11 @@ export function loadConfig(): Config {
     },
     llm: loadLlmConfig(),
     allowedUsers: allowed && allowed.length > 0 ? new Set(allowed.map((u) => `slack:${u}`)) : undefined,
+    hostsCfg: loadHostsConfig(),
+    localShellAllowlist: process.env.LOCAL_SHELL_ALLOWLIST
+      ? process.env.LOCAL_SHELL_ALLOWLIST.split(",").map((s) => s.trim()).filter(Boolean)
+      : [],
+    auditDbPath: process.env.SHERLOCK_AUDIT_DB ?? "sherlock-audit.sqlite",
   };
 }
 
@@ -53,7 +78,6 @@ function loadLlmConfig(): LlmCfg {
   }
 
   if (provider === "openai") {
-    // Default to OpenRouter if OPENROUTER_API_KEY is set, else require OPENAI_API_KEY.
     const orKey = process.env.OPENROUTER_API_KEY;
     const baseUrl =
       process.env.OPENAI_BASE_URL ??
@@ -71,6 +95,39 @@ function loadLlmConfig(): LlmCfg {
   }
 
   throw new Error(`unknown LLM_PROVIDER: ${provider} (expected anthropic | openai)`);
+}
+
+function loadHostsConfig(): HostsCfg | undefined {
+  const path = process.env.SHERLOCK_HOSTS_FILE ?? "hosts.json";
+  let raw: string;
+  try {
+    raw = readFileSync(resolvePath(process.cwd(), path), "utf8");
+  } catch {
+    return undefined;
+  }
+
+  let parsed: { port?: number; path?: string; hosts?: HostEntry[] };
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new Error(`failed to parse ${path}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  if (!parsed.hosts || !Array.isArray(parsed.hosts) || parsed.hosts.length === 0) {
+    throw new Error(`${path}: 'hosts' must be a non-empty array of {id, token}`);
+  }
+  for (const h of parsed.hosts) {
+    if (!h.id || !h.token) throw new Error(`${path}: each host needs both 'id' and 'token'`);
+    if (h.shellAllowlist && !Array.isArray(h.shellAllowlist)) {
+      throw new Error(`${path}: shellAllowlist for ${h.id} must be an array of strings`);
+    }
+  }
+
+  return {
+    port: parsed.port ?? Number(process.env.SHERLOCK_HUB_PORT ?? 8787),
+    path: parsed.path ?? "/agent",
+    hosts: parsed.hosts,
+  };
 }
 
 function required(name: string): string {

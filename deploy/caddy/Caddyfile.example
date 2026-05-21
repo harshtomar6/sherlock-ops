@@ -1,0 +1,16 @@
+# Terminate TLS for the sherlock-ops agent endpoint.
+# Replace sherlock.example.com with your actual hostname.
+#
+# Caddy auto-provisions a Let's Encrypt cert (the host must have ports 80 + 443
+# reachable from the public internet for the ACME challenge).
+
+sherlock.example.com {
+    # Forward the agent websocket endpoint to the control plane.
+    # Caddy's reverse_proxy handles WebSocket upgrade automatically.
+    handle_path /agent* {
+        reverse_proxy 127.0.0.1:8787
+    }
+
+    # Everything else: 404. The control plane has no other public surface.
+    respond 404
+}

@@ -4,142 +4,118 @@ An AI ops bot that investigates and reports on your servers in plain English.
 Ask it *"why does api-server keep restarting?"* in Slack — it inspects PM2,
 reads the right logs, and tells you what it found.
 
-> **Status:** MVP. Single-host, Slack-only, PM2-focused. Multi-host agents,
-> approvals, and additional interfaces (CLI/Web) are on the roadmap.
+> **Status:** Phase 3 — approval flow + mutating ops + shell. Multi-host, single Slack workspace, SQLite audit.
+> See the [roadmap](#roadmap) for what's next.
 
-## What works today
+## What it does
 
-- **Slack interface** (Socket Mode — no public URL required)
-- **PM2 tools:** `pm2_list`, `pm2_describe`, `pm2_logs`
-- **Anthropic-powered tool-use loop** — typed tool calls, no free-form shell
-- **Append-only audit log** to stdout (structured JSON)
-- **User allowlist** via env
+- **Investigates in plain English.** Ask in Slack, get a focused answer with evidence.
+- **Manages PM2 across a fleet.** List, describe, tail logs, restart, stop, start, reload, delete.
+- **Runs shell commands safely.** Per-host allowlist for routine diagnostics; everything else needs human approval.
+- **Approval in-thread.** Interactive Approve/Deny buttons in Slack for any mutating or non-allowlisted call.
+- **Audits everything.** Append-only SQLite log of every request, tool call, and approval.
 
 ## Architecture
 
 ```
-Slack → Gateway → Orchestrator (LLM tool-use loop) → Tools → Local Executor
-                                                        │
-                                                        └── pm2_list / describe / logs
+       Slack ─→ control plane ─wss──→ sherlock-agent (host A) ─→ pm2 + shell
+                     │       └─wss──→ sherlock-agent (host B) ─→ pm2 + shell
+                     ├── LLM (OpenRouter / Anthropic / OpenAI / Ollama)
+                     └── SQLite audit
 ```
 
-The core is interface-agnostic — Slack is one adapter; CLI, Web, and REST
-adapters slot in without touching the orchestrator. LLM providers are
-pluggable behind a small interface (Anthropic ships first).
+Interface-agnostic core, pluggable LLM providers, agent dial-out over WSS
+(no inbound ports on target hosts).
 
-## Setup
+## Quick start (single host)
 
-### 1. Create a Slack app
-
-Go to <https://api.slack.com/apps> → **Create New App** → **From manifest**,
-then paste:
-
-```yaml
-display_information:
-  name: Sherlock
-  description: AI ops bot for PM2 + logs
-features:
-  bot_user:
-    display_name: Sherlock
-    always_online: true
-oauth_config:
-  scopes:
-    bot:
-      - app_mentions:read
-      - chat:write
-      - im:history
-      - im:read
-      - im:write
-settings:
-  event_subscriptions:
-    bot_events:
-      - app_mention
-      - message.im
-  interactivity:
-    is_enabled: true
-  socket_mode_enabled: true
-```
-
-Install the app to your workspace. From the app config page collect:
-
-- **Bot User OAuth Token** (`xoxb-…`) → `SLACK_BOT_TOKEN`
-- **App-Level Token** with `connections:write` scope (`xapp-…`) → `SLACK_APP_TOKEN`
-- **Signing Secret** → `SLACK_SIGNING_SECRET`
-
-### 2. Configure env
+For trying it on one machine.
 
 ```bash
+git clone https://github.com/your-fork/sherlock-ops.git
+cd sherlock-ops
+npm ci
 cp .env.example .env
-# edit .env with your Slack tokens and an LLM API key
-```
-
-**LLM provider — pick one:**
-
-| Provider | `LLM_PROVIDER` | Key var | Default model |
-|---|---|---|---|
-| OpenRouter (recommended) | `openai` | `OPENROUTER_API_KEY` | `anthropic/claude-opus-4` |
-| Anthropic direct | `anthropic` | `ANTHROPIC_API_KEY` | `claude-opus-4-7` |
-| OpenAI direct | `openai` | `OPENAI_API_KEY` | `gpt-4o` |
-| Any OpenAI-compatible (Together, Groq, Ollama, …) | `openai` | `OPENAI_API_KEY` + `OPENAI_BASE_URL` | set `LLM_MODEL` |
-
-The `openai` provider is a generic OpenAI-compatible client — point `OPENAI_BASE_URL`
-at any endpoint that speaks the OpenAI chat-completions API. If `OPENROUTER_API_KEY`
-is set, the base URL and identification headers are configured for you.
-
-Set `ALLOWED_SLACK_USERS` to a comma-separated list of Slack user IDs
-(e.g. `U01ABC,U02DEF`). Leave empty only in trusted environments.
-
-### 3. Install + run
-
-```bash
-npm install
+# edit .env: Slack tokens (xoxb / xapp / signing) + an LLM key (e.g. OPENROUTER_API_KEY)
 npm run dev
 ```
 
-You should see `sherlock_ops_ready` in the logs.
-
-### 4. Use it
-
-In Slack, DM Sherlock or `@mention` it in any channel it's been invited to:
+In Slack:
 
 ```
-@Sherlock list all pm2 processes
+@Sherlock list pm2 processes
 @Sherlock why is api-server restarting? show me the last 200 lines of stderr
-@Sherlock which process is using the most memory right now?
+@Sherlock restart api-server      # triggers an Approve/Deny prompt
 ```
+
+## Deploying it for real
+
+For multi-host fleets, TLS, systemd, Docker, secret management, audit retention,
+and the hardening checklist — see **[docs/SELF_HOSTING.md](docs/SELF_HOSTING.md)**.
+
+## Tools reference
+
+| Tool | Scope | Notes |
+|---|---|---|
+| `pm2_list` | read | Status, restarts, uptime, CPU, memory per process |
+| `pm2_describe` | read | Log paths, exit code, env, restart history |
+| `pm2_logs` | read | Tail stdout/stderr/both, up to 2000 lines |
+| `pm2_restart` | mutate | Approval required |
+| `pm2_stop` | mutate | Approval required |
+| `pm2_start` | mutate | Approval required |
+| `pm2_reload` | mutate | Zero-downtime reload; approval required |
+| `pm2_delete` | dangerous | Removes process entry; approval required |
+| `shell_exec` | dynamic | Allowlisted command → no approval. Anything else → approval. |
 
 ## Project layout
 
 ```
 src/
-├── adapters/slack.ts        # Slack Bolt app
+├── adapters/
+│   ├── slack.ts             # Slack Bolt app + approval action handler
+│   └── slackApproval.ts     # SlackApprovalBroker — interactive Approve/Deny
+├── agent/index.ts           # sherlock-agent daemon (runs on each target host)
+├── audit/store.ts           # SQLite append-only audit log
+├── controlplane/
+│   └── agentHub.ts          # WSS server + agent registry + RPC dispatch
 ├── core/
+│   ├── approval.ts          # ApprovalBroker interface + DenyAllBroker
 │   ├── gateway.ts           # auth, audit, error handling
-│   ├── orchestrator.ts      # LLM tool-use loop
+│   ├── orchestrator.ts      # LLM tool-use loop + scope/approval enforcement
 │   ├── registry.ts          # tool registry + JSON schema export
 │   └── types.ts             # Request / Response shapes
 ├── executor/
+│   ├── hostResolver.ts      # resolves Executor + allowlist for a host id
 │   ├── local.ts             # spawn child_process locally
+│   ├── remote.ts            # dispatch exec via AgentHub
 │   └── types.ts             # Executor interface
 ├── llm/
 │   ├── anthropic.ts         # Anthropic provider (with prompt caching)
-│   ├── openai.ts            # OpenAI-compatible provider (OpenRouter, OpenAI, Together, Groq, Ollama)
+│   ├── openai.ts            # OpenAI-compatible (OpenRouter / OpenAI / Together / Groq / Ollama)
 │   └── types.ts             # LLMProvider interface
+├── proto/
+│   └── types.ts             # agent ↔ control-plane wire format
 ├── tools/
-│   ├── pm2.ts               # pm2_list, pm2_describe, pm2_logs
-│   └── types.ts             # Tool interface + defineTool helper
-├── config.ts                # env loading
-└── index.ts                 # entry: wires everything
+│   ├── pm2.ts               # PM2 read + mutating tools
+│   ├── shell.ts             # shell_exec + tokenizer + allowlist matcher
+│   └── types.ts             # Tool interface + defineTool + dynamic scope
+├── config.ts                # env + hosts.json loading
+└── index.ts                 # control plane entry
+
+deploy/
+├── systemd/                 # sherlock-ops + sherlock-agent unit files
+├── caddy/Caddyfile.example  # TLS proxy
+└── nginx/sherlock.conf.example
 ```
 
 ## Roadmap
 
-- **Phase 1** (current MVP): single-host, Slack-only, PM2 read tools
-- **Phase 2:** `sherlock-agent` daemon — central control plane + WSS to multiple hosts
-- **Phase 3:** approval flow for mutating ops (`pm2_restart`, `shell_exec`); SQLite audit log
+- ✅ **Phase 1:** single-host, Slack-only, PM2 read tools
+- ✅ **Phase 2:** multi-host with `sherlock-agent`; provider-agnostic LLM
+- ✅ **Phase 3:** approval flow; `shell_exec` with per-host allowlist; SQLite audit
 - **Phase 4:** additional adapters (CLI, REST, Web UI)
-- **Phase 5:** additional LLM providers (OpenAI, Ollama)
-- **Phase 6:** more tool packs — systemd, docker, journalctl, k8s
+- **Phase 5:** more tool packs — systemd, docker, journalctl, k8s
+- **Phase 6:** approval policies (auto-approve for trusted users on specific tools)
 
 ## License
 

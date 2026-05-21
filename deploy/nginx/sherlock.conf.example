@@ -1,0 +1,43 @@
+# nginx site config for terminating TLS in front of sherlock-ops.
+# Copy to /etc/nginx/sites-available/, symlink into sites-enabled/, then `nginx -t && systemctl reload nginx`.
+#
+# Get the cert separately (certbot, acme.sh, …).
+
+upstream sherlock_hub {
+    server 127.0.0.1:8787;
+    keepalive 32;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name sherlock.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/sherlock.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/sherlock.example.com/privkey.pem;
+
+    # WebSocket endpoint for agents.
+    location /agent {
+        proxy_pass http://sherlock_hub/agent;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+        # Keep long-lived agent connections open. Agents send pings every 30s;
+        # we use a generous read timeout to survive idle periods.
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+
+    location / {
+        return 404;
+    }
+}
+
+server {
+    listen 80;
+    server_name sherlock.example.com;
+    return 301 https://$host$request_uri;
+}

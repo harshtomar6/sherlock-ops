@@ -1,6 +1,7 @@
-import { App } from "@slack/bolt";
+import { App, type BlockAction, type ButtonAction } from "@slack/bolt";
 import type { WebClient } from "@slack/web-api";
 import type { Gateway } from "../core/gateway.js";
+import { SlackApprovalRegistry } from "./slackApproval.js";
 
 export interface SlackAdapterOpts {
   botToken: string;
@@ -12,6 +13,7 @@ export interface SlackAdapterOpts {
 export class SlackAdapter {
   private app: App;
   private gateway: Gateway;
+  private approvals = new SlackApprovalRegistry();
 
   constructor(opts: SlackAdapterOpts) {
     this.gateway = opts.gateway;
@@ -58,6 +60,18 @@ export class SlackAdapter {
         client,
       });
     });
+
+    this.app.action<BlockAction<ButtonAction>>(
+      "sherlock_approval",
+      async ({ ack, action, body, client }) => {
+        await ack();
+        const value = action.value ?? "";
+        const [verb, id] = value.split(":", 2);
+        if (!id || (verb !== "approve" && verb !== "deny")) return;
+        const decidedBy = `slack:${body.user.id}`;
+        await this.approvals.decide(id, verb === "approve", decidedBy, client);
+      },
+    );
   }
 
   private async dispatch(opts: {
@@ -73,11 +87,14 @@ export class SlackAdapter {
       text: ":mag: investigating…",
     });
 
+    const broker = this.approvals.newBroker(opts.channel, opts.threadTs, opts.client);
+
     const resp = await this.gateway.handle({
       source: "slack",
       userId: `slack:${opts.userId}`,
       conversationId: `slack:${opts.channel}:${opts.threadTs}`,
       text: opts.text,
+      approvalBroker: broker,
     });
 
     if (ack.ts) {

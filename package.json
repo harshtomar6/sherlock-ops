@@ -9,19 +9,25 @@
   },
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "dev:agent": "tsx watch src/agent/index.ts",
     "build": "tsc -p .",
     "start": "node dist/index.js",
+    "start:agent": "node dist/agent/index.js",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.40.0",
     "@slack/bolt": "^4.1.0",
+    "better-sqlite3": "^11.3.0",
     "dotenv": "^16.4.5",
+    "ws": "^8.18.0",
     "zod": "^3.23.8",
     "zod-to-json-schema": "^3.23.5"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
     "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.13",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0"
   }

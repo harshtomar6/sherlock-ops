@@ -1,7 +1,12 @@
 node_modules
 dist
-.env
+.env*
 hosts.json
 sherlock-audit.sqlite*
+.git
+.gitignore
 *.log
 .DS_Store
+docs
+deploy
+.claude

@@ -1,9 +1,13 @@
+import type { AuditStore } from "../audit/store.js";
 import type {
   AssistantContentBlock,
   LLMProvider,
   ProviderMessage,
   UserContentBlock,
 } from "../llm/types.js";
+import { effectiveScope, type Tool, type ToolScope } from "../tools/types.js";
+import type { ApprovalBroker, ApprovalDecision } from "./approval.js";
+import { DenyAllBroker } from "./approval.js";
 import type { ToolRegistry } from "./registry.js";
 import type { Request, Response } from "./types.js";
 
@@ -15,6 +19,7 @@ Operating principles:
 - Cite concrete evidence: process names, restart counts, error messages, timestamps. Avoid vague answers.
 - Be concise. Report the finding, then the evidence. Use code blocks for log excerpts.
 - If a tool fails or returns no useful info, say so plainly. Don't speculate.
+- Some tools (pm2_restart, pm2_stop, shell_exec with non-allowlisted commands) require human approval. Explain *why* you want to run them in your message text right before the tool call — the approver sees this rationale.
 - Only use tools you have been given. Do not invent commands.`;
 
 const MAX_TOOL_ITERATIONS = 10;
@@ -23,6 +28,11 @@ export interface OrchestratorOpts {
   llm: LLMProvider;
   registry: ToolRegistry;
   maxIterations?: number;
+}
+
+export interface OrchestratorContext {
+  audit?: AuditStore;
+  requestId?: string;
 }
 
 export class Orchestrator {
@@ -36,12 +46,12 @@ export class Orchestrator {
     this.maxIterations = opts.maxIterations ?? MAX_TOOL_ITERATIONS;
   }
 
-  async handle(req: Request): Promise<Response> {
-    const messages: ProviderMessage[] = [
-      { role: "user", content: req.text },
-    ];
-
+  async handle(req: Request, ctx: OrchestratorContext = {}): Promise<Response> {
+    const messages: ProviderMessage[] = [{ role: "user", content: req.text }];
     const toolDefs = this.registry.toProviderDefs();
+    const broker = req.approvalBroker ?? new DenyAllBroker();
+
+    let lastAssistantText = "";
 
     for (let i = 0; i < this.maxIterations; i++) {
       const resp = await this.llm.chat({
@@ -49,67 +59,145 @@ export class Orchestrator {
         messages,
         tools: toolDefs,
       });
-
       messages.push({ role: "assistant", content: resp.content });
+
+      lastAssistantText = textOf(resp.content);
 
       const toolCalls = resp.content.filter(
         (b): b is Extract<AssistantContentBlock, { type: "tool_call" }> => b.type === "tool_call",
       );
 
       if (toolCalls.length === 0 || resp.stopReason === "end") {
-        const text = resp.content
-          .filter((b): b is Extract<AssistantContentBlock, { type: "text" }> => b.type === "text")
-          .map((b) => b.text)
-          .join("\n")
-          .trim();
-        return { text: text || "(no response)" };
+        return { text: lastAssistantText || "(no response)" };
       }
 
       const results: UserContentBlock[] = await Promise.all(
-        toolCalls.map(async (call) => runToolCall(this.registry, call)),
+        toolCalls.map((call) => this.runOne(call, broker, ctx, lastAssistantText)),
       );
       messages.push({ role: "user", content: results });
     }
 
     return { text: `Stopped after ${this.maxIterations} tool iterations without a final answer.` };
   }
+
+  private async runOne(
+    call: Extract<AssistantContentBlock, { type: "tool_call" }>,
+    broker: ApprovalBroker,
+    ctx: OrchestratorContext,
+    rationale: string,
+  ): Promise<UserContentBlock> {
+    const tool = this.registry.get(call.name);
+    if (!tool) {
+      return toolError(call.id, `unknown tool: ${call.name}`);
+    }
+
+    const parsed = tool.schema.safeParse(call.args);
+    if (!parsed.success) {
+      return toolError(call.id, `invalid args: ${parsed.error.message}`);
+    }
+    const args = parsed.data;
+    const scope: ToolScope = effectiveScope(tool, args);
+    const host = extractHost(args);
+
+    let approvalId: string | undefined;
+    if (scope === "mutate" || scope === "dangerous") {
+      approvalId = ctx.audit?.recordApprovalRequest({
+        requestId: ctx.requestId ?? "",
+        toolName: tool.name,
+        scope,
+        args,
+      });
+
+      const decision: ApprovalDecision = await broker.requestApproval({
+        toolName: tool.name,
+        scope,
+        args,
+        rationale: rationale || undefined,
+      });
+
+      if (approvalId && ctx.audit) {
+        ctx.audit.recordApprovalDecision({
+          approvalId,
+          approved: decision.approved,
+          decidedBy: decision.decidedBy,
+          reason: decision.reason,
+        });
+      }
+
+      if (!decision.approved) {
+        ctx.audit?.recordToolCall({
+          requestId: ctx.requestId ?? "",
+          name: tool.name,
+          scope,
+          host,
+          args,
+          ok: false,
+          error: decision.reason ?? "denied",
+          durationMs: 0,
+          approvalId,
+        });
+        return toolError(
+          call.id,
+          `denied${decision.decidedBy ? ` by ${decision.decidedBy}` : ""}${decision.reason ? `: ${decision.reason}` : ""}`,
+        );
+      }
+    }
+
+    const startedAt = Date.now();
+    try {
+      const result = await tool.run(args);
+      const durationMs = Date.now() - startedAt;
+      ctx.audit?.recordToolCall({
+        requestId: ctx.requestId ?? "",
+        name: tool.name,
+        scope,
+        host,
+        args,
+        ok: true,
+        result,
+        durationMs,
+        approvalId,
+      });
+      return {
+        type: "tool_result",
+        toolCallId: call.id,
+        content: typeof result === "string" ? result : JSON.stringify(result, null, 2),
+      };
+    } catch (err) {
+      const durationMs = Date.now() - startedAt;
+      const msg = err instanceof Error ? err.message : String(err);
+      ctx.audit?.recordToolCall({
+        requestId: ctx.requestId ?? "",
+        name: tool.name,
+        scope,
+        host,
+        args,
+        ok: false,
+        error: msg,
+        durationMs,
+        approvalId,
+      });
+      return toolError(call.id, msg);
+    }
+  }
 }
 
-async function runToolCall(
-  registry: ToolRegistry,
-  call: Extract<AssistantContentBlock, { type: "tool_call" }>,
-): Promise<UserContentBlock> {
-  const tool = registry.get(call.name);
-  if (!tool) {
-    return {
-      type: "tool_result",
-      toolCallId: call.id,
-      content: `unknown tool: ${call.name}`,
-      isError: true,
-    };
+function toolError(id: string, content: string): UserContentBlock {
+  return { type: "tool_result", toolCallId: id, content, isError: true };
+}
+
+function textOf(content: AssistantContentBlock[]): string {
+  return content
+    .filter((b): b is Extract<AssistantContentBlock, { type: "text" }> => b.type === "text")
+    .map((b) => b.text)
+    .join("\n")
+    .trim();
+}
+
+function extractHost(args: unknown): string | undefined {
+  if (args && typeof args === "object" && "host" in args) {
+    const h = (args as { host?: unknown }).host;
+    if (typeof h === "string") return h;
   }
-  const parsed = tool.schema.safeParse(call.args);
-  if (!parsed.success) {
-    return {
-      type: "tool_result",
-      toolCallId: call.id,
-      content: `invalid args: ${parsed.error.message}`,
-      isError: true,
-    };
-  }
-  try {
-    const result = await tool.run(parsed.data);
-    return {
-      type: "tool_result",
-      toolCallId: call.id,
-      content: typeof result === "string" ? result : JSON.stringify(result, null, 2),
-    };
-  } catch (err) {
-    return {
-      type: "tool_result",
-      toolCallId: call.id,
-      content: err instanceof Error ? err.message : String(err),
-      isError: true,
-    };
-  }
+  return undefined;
 }
