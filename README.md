@@ -103,8 +103,44 @@ Both packs are on by default. Set either to `false` to disable. The startup
 log surfaces `promptSource` and `enabledPacks` so the live configuration is
 always visible. See `sherlock-config.example.json` for a working file.
 
-> Custom tools loaded from YAML / plugin modules are on the roadmap — see
-> the Roadmap section.
+### Custom tools (YAML)
+
+Declare your own tools in `sherlock-tools.yaml` (override path via
+`SHERLOCK_TOOLS_FILE`). Each declaration becomes a typed, approval-aware
+tool the LLM can call — no TypeScript required.
+
+```yaml
+tools:
+  - name: redis_ping
+    description: "PING Redis on the target host."
+    scope: read
+    exec:
+      argv: ["redis-cli", "PING"]
+
+  - name: postgres_table_size
+    description: "Report on-disk size of a Postgres table."
+    scope: read
+    schema:
+      table: { type: string, optional: true }
+    exec:
+      argv: ["psql", "-At", "-c", "SELECT pg_size_pretty(pg_total_relation_size('{{table}}'))"]
+```
+
+- **Argv only.** Tools execute via `spawn` with `shell: false` — no shell
+  expansion, no string interpolation into a shell. `{{var}}` placeholders
+  substitute into individual argv elements.
+- **Optional drop.** A standalone `{{var}}` argv element disappears when
+  `var` is unset, so flags like `--table={{table}}` can be conditional.
+- **Allowlist downgrade.** Set `allowlistDowngrade: true` to let an
+  invocation skip approval when its argv matches the host's shell
+  allowlist (same matcher as `shell_exec`).
+- **Scope.** `read` runs freely; `mutate` and `dangerous` go through
+  Slack Approve/Deny. Field types: `string`, `number`, `integer`,
+  `boolean`, `enum` (with `values:`).
+
+See `sherlock-tools.example.yaml` for the full feature list.
+
+> ESM plugin modules for stateful or multi-step tools are on the roadmap.
 
 ## Deploying it for real
 

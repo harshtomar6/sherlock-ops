@@ -1,0 +1,66 @@
+# sherlock-tools.yaml — declarative custom tools.
+# Loaded at boot from cwd by default; override with SHERLOCK_TOOLS_FILE.
+# Each entry is wrapped in the same Executor + approval flow as built-in tools.
+
+tools:
+  # 1) Read-only probe with no parameters.
+  - name: redis_ping
+    description: |
+      PING the Redis server on the target host. Reports PONG or an
+      error string. Use to confirm Redis is reachable before deeper
+      investigation.
+    scope: read
+    exec:
+      argv: ["redis-cli", "PING"]
+    timeoutMs: 5000
+
+  # 2) Optional parameter dropped from argv when unset.
+  #    The `--table=` element is omitted entirely when `table` is undefined.
+  - name: postgres_table_size
+    description: "Report on-disk size of a Postgres table. Without --table reports total DB size."
+    scope: read
+    schema:
+      table:
+        type: string
+        optional: true
+        description: "Table name; omit for DB total"
+    exec:
+      argv:
+        - "psql"
+        - "-At"
+        - "-c"
+        - "SELECT pg_size_pretty(pg_total_relation_size('{{table}}'))"
+
+  # 3) Mutating tool — always requires approval.
+  - name: nginx_reload
+    description: "Gracefully reload nginx workers (no downtime). Use after editing config."
+    scope: mutate
+    exec:
+      argv: ["sudo", "systemctl", "reload", "nginx"]
+
+  # 4) Allowlist-aware: when argv matches the host's shellAllowlist, scope
+  #    downgrades to 'read' and no approval is needed. Useful for general
+  #    diagnostic wrappers operators don't want to retype each time.
+  - name: disk_usage
+    description: "Disk usage on the target host."
+    scope: dangerous
+    allowlistDowngrade: true
+    exec:
+      argv: ["df", "-h"]
+
+  # 5) Enum + integer with bounds.
+  - name: journald_tail
+    description: "Tail journald for a unit."
+    scope: read
+    schema:
+      unit:
+        type: enum
+        values: ["nginx", "sherlock-agent", "sherlock-ops"]
+        description: "Unit name"
+      lines:
+        type: integer
+        default: 200
+        min: 10
+        max: 2000
+    exec:
+      argv: ["journalctl", "-u", "{{unit}}", "-n", "{{lines}}", "--no-pager"]

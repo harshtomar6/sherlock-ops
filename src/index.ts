@@ -1,6 +1,7 @@
 import { SlackAdapter } from "./adapters/slack.js";
 import { AuditStore } from "./audit/store.js";
 import { loadConfig, type LlmCfg } from "./config.js";
+import { loadCustomTools } from "./config/customTools.js";
 import { loadSystemPrompt } from "./config/prompt.js";
 import { enabledPackNames, loadToolPacks } from "./config/toolPacks.js";
 import { AgentHub } from "./controlplane/agentHub.js";
@@ -16,6 +17,7 @@ import {
 import { AnthropicProvider } from "./llm/anthropic.js";
 import { OpenAIProvider } from "./llm/openai.js";
 import type { LLMProvider } from "./llm/types.js";
+import { buildDeclarativeTools } from "./tools/declarative.js";
 import { buildPm2Tools } from "./tools/pm2.js";
 import { buildShellTools } from "./tools/shell.js";
 
@@ -62,10 +64,14 @@ async function main(): Promise<void> {
 
   const prompt = loadSystemPrompt();
   const packs = loadToolPacks();
+  const customTools = loadCustomTools();
 
   const registry = new ToolRegistry();
   if (packs.pm2) registry.registerAll(buildPm2Tools(resolver));
   if (packs.shell) registry.registerAll(buildShellTools(resolver));
+  if (customTools.declarations.length > 0) {
+    registry.registerAll(buildDeclarativeTools(customTools.declarations, resolver));
+  }
 
   const orchestrator = new Orchestrator({
     llm,
@@ -93,6 +99,8 @@ async function main(): Promise<void> {
       llm: cfg.llm.kind === "anthropic" ? `anthropic:${cfg.llm.model}` : `openai-compat:${cfg.llm.baseUrl}:${cfg.llm.model}`,
       promptSource: prompt.source,
       enabledPacks: enabledPackNames(packs),
+      customToolsSource: customTools.source,
+      customTools: customTools.declarations.map((d) => d.name),
       tools: registry.toProviderDefs().map((t) => t.name),
       hubPort: cfg.hostsCfg?.port,
       auditDb: cfg.auditDbPath,
