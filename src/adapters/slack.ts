@@ -2,6 +2,7 @@ import { App, type BlockAction, type ButtonAction } from "@slack/bolt";
 import type { WebClient } from "@slack/web-api";
 import type { Gateway } from "../core/gateway.js";
 import { SlackApprovalRegistry } from "./slackApproval.js";
+import { toSlackMrkdwn } from "./slackFormat.js";
 
 export interface SlackAdapterOpts {
   botToken: string;
@@ -99,17 +100,18 @@ export class SlackAdapter {
       approvalBroker: broker,
     });
 
+    const slackText = toSlackMrkdwn(resp.text);
     if (ack.ts) {
       await opts.client.chat.update({
         channel: opts.channel,
         ts: ack.ts,
-        text: resp.text,
+        text: slackText,
       });
     } else {
       await opts.client.chat.postMessage({
         channel: opts.channel,
         thread_ts: opts.threadTs,
-        text: resp.text,
+        text: slackText,
       });
     }
   }
