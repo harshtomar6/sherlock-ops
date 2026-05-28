@@ -21,12 +21,32 @@ reads the right logs, and tells you what it found.
 ```
        Slack ─→ control plane ─wss──→ sherlock-agent (host A) ─→ pm2 + shell
                      │       └─wss──→ sherlock-agent (host B) ─→ pm2 + shell
+                     ├── LocalExecutor (control plane itself, optional)
                      ├── LLM (OpenRouter / Anthropic / OpenAI / Ollama)
                      └── SQLite audit
 ```
 
 Interface-agnostic core, pluggable LLM providers, agent dial-out over WSS
 (no inbound ports on target hosts).
+
+### Control-plane as a target (multi-host)
+
+By default the control plane only orchestrates remote agents. To let it also
+run shell / pm2 tools on itself, add a `controlPlane` block to `hosts.json`:
+
+```json
+{
+  "controlPlane": {
+    "id": "control-plane",
+    "shellAllowlist": ["df -h", "uptime", "systemctl status sherlock-ops"]
+  },
+  "hosts": [ { "id": "api-prod-1", "token": "..." } ]
+}
+```
+
+The reserved id (`control-plane` by default) shows up as a selectable host in
+every tool. Commands targeted at it run via the local executor — no agent
+process needed. Non-allowlisted commands still require Slack approval.
 
 ## Quick start (single host)
 

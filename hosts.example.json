@@ -1,6 +1,18 @@
 {
   "port": 8787,
   "path": "/agent",
+  "controlPlane": {
+    "id": "control-plane",
+    "shellAllowlist": [
+      "df -h",
+      "free -m",
+      "uptime",
+      "ps aux",
+      "systemctl status sherlock-ops",
+      "journalctl -u sherlock-ops",
+      "cat /proc/loadavg"
+    ]
+  },
   "hosts": [
     {
       "id": "api-prod-1",

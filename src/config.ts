@@ -26,10 +26,19 @@ export interface HostEntry {
   shellAllowlist?: string[];
 }
 
+export interface ControlPlaneCfg {
+  /** Host id used by tools to target the control plane itself. */
+  id: string;
+  /** Shell allowlist for commands executed on the control plane. */
+  shellAllowlist: string[];
+}
+
 export interface HostsCfg {
   port: number;
   path: string;
   hosts: HostEntry[];
+  /** When set, the control plane is itself addressable as a host via this id. */
+  controlPlane: ControlPlaneCfg | undefined;
 }
 
 export interface Config {
@@ -119,7 +128,12 @@ function loadHostsConfig(): HostsCfg | undefined {
     return undefined;
   }
 
-  let parsed: { port?: number; path?: string; hosts?: HostEntry[] };
+  let parsed: {
+    port?: number;
+    path?: string;
+    hosts?: HostEntry[];
+    controlPlane?: { id?: string; shellAllowlist?: string[] };
+  };
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
@@ -136,11 +150,34 @@ function loadHostsConfig(): HostsCfg | undefined {
     }
   }
 
+  const controlPlane = parseControlPlane(path, parsed.controlPlane, parsed.hosts);
+
   return {
     port: parsed.port ?? Number(process.env.SHERLOCK_HUB_PORT ?? 8787),
     path: parsed.path ?? "/agent",
     hosts: parsed.hosts,
+    controlPlane,
   };
+}
+
+function parseControlPlane(
+  path: string,
+  raw: { id?: string; shellAllowlist?: string[] } | undefined,
+  hosts: HostEntry[],
+): ControlPlaneCfg | undefined {
+  if (!raw) return undefined;
+  const id = (raw.id ?? "control-plane").trim();
+  if (!id) throw new Error(`${path}: controlPlane.id must be a non-empty string`);
+  if (hosts.some((h) => h.id === id)) {
+    throw new Error(
+      `${path}: controlPlane.id '${id}' conflicts with a remote host id — pick a distinct name`,
+    );
+  }
+  const allowlist = raw.shellAllowlist ?? [];
+  if (!Array.isArray(allowlist)) {
+    throw new Error(`${path}: controlPlane.shellAllowlist must be an array of strings`);
+  }
+  return { id, shellAllowlist: allowlist };
 }
 
 function required(name: string): string {

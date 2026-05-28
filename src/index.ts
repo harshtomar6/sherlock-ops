@@ -52,6 +52,7 @@ async function main(): Promise<void> {
     resolver = new RemoteHostResolver(
       hub,
       cfg.hostsCfg.hosts.map((h) => ({ id: h.id, shellAllowlist: h.shellAllowlist })),
+      cfg.hostsCfg.controlPlane,
     );
   } else {
     resolver = new LocalHostResolver(cfg.localShellAllowlist);
@@ -78,6 +79,7 @@ async function main(): Promise<void> {
       event: "sherlock_ops_ready",
       mode: cfg.hostsCfg ? "multi_host" : "single_host",
       hosts: resolver.knownHosts(),
+      controlPlaneAddressable: cfg.hostsCfg?.controlPlane?.id,
       llm: cfg.llm.kind === "anthropic" ? `anthropic:${cfg.llm.model}` : `openai-compat:${cfg.llm.baseUrl}:${cfg.llm.model}`,
       tools: registry.toProviderDefs().map((t) => t.name),
       hubPort: cfg.hostsCfg?.port,
