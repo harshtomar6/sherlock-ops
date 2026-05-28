@@ -1,6 +1,8 @@
 import { SlackAdapter } from "./adapters/slack.js";
 import { AuditStore } from "./audit/store.js";
 import { loadConfig, type LlmCfg } from "./config.js";
+import { loadSystemPrompt } from "./config/prompt.js";
+import { enabledPackNames, loadToolPacks } from "./config/toolPacks.js";
 import { AgentHub } from "./controlplane/agentHub.js";
 import { ConversationStore } from "./core/conversationStore.js";
 import { Gateway } from "./core/gateway.js";
@@ -58,11 +60,19 @@ async function main(): Promise<void> {
     resolver = new LocalHostResolver(cfg.localShellAllowlist);
   }
 
-  const registry = new ToolRegistry();
-  registry.registerAll(buildPm2Tools(resolver));
-  registry.registerAll(buildShellTools(resolver));
+  const prompt = loadSystemPrompt();
+  const packs = loadToolPacks();
 
-  const orchestrator = new Orchestrator({ llm, registry, conversations });
+  const registry = new ToolRegistry();
+  if (packs.pm2) registry.registerAll(buildPm2Tools(resolver));
+  if (packs.shell) registry.registerAll(buildShellTools(resolver));
+
+  const orchestrator = new Orchestrator({
+    llm,
+    registry,
+    conversations,
+    systemPrompt: prompt.text,
+  });
   const gateway = new Gateway({ orchestrator, audit, allowedUsers: cfg.allowedUsers });
 
   const slack = new SlackAdapter({
@@ -81,6 +91,8 @@ async function main(): Promise<void> {
       hosts: resolver.knownHosts(),
       controlPlaneAddressable: cfg.hostsCfg?.controlPlane?.id,
       llm: cfg.llm.kind === "anthropic" ? `anthropic:${cfg.llm.model}` : `openai-compat:${cfg.llm.baseUrl}:${cfg.llm.model}`,
+      promptSource: prompt.source,
+      enabledPacks: enabledPackNames(packs),
       tools: registry.toProviderDefs().map((t) => t.name),
       hubPort: cfg.hostsCfg?.port,
       auditDb: cfg.auditDbPath,

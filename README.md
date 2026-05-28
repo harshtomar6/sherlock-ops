@@ -69,6 +69,43 @@ In Slack:
 @Sherlock restart api-server      # triggers an Approve/Deny prompt
 ```
 
+## Customising the bot
+
+Sherlock ships with a PM2-flavoured prompt and PM2 + shell tool packs. Both
+are swappable without forking.
+
+### System prompt
+
+Point `SHERLOCK_SYSTEM_PROMPT_FILE` at any markdown file:
+
+```bash
+SHERLOCK_SYSTEM_PROMPT_FILE=./prompts/my-ops.md npm run dev
+```
+
+A missing file fails at boot — Sherlock never silently falls back to the
+default after an operator asked for a specific prompt. The bundled default
+lives at `src/prompts/default.md` and is a good starting point to copy.
+
+### Built-in tool packs
+
+Drop a `sherlock-config.json` next to your `hosts.json`:
+
+```json
+{
+  "toolPacks": {
+    "pm2": true,
+    "shell": true
+  }
+}
+```
+
+Both packs are on by default. Set either to `false` to disable. The startup
+log surfaces `promptSource` and `enabledPacks` so the live configuration is
+always visible. See `sherlock-config.example.json` for a working file.
+
+> Custom tools loaded from YAML / plugin modules are on the roadmap — see
+> the Roadmap section.
+
 ## Deploying it for real
 
 For multi-host fleets, TLS, systemd, Docker, secret management, audit retention,

@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "dev:agent": "tsx watch src/agent/index.ts",
-    "build": "tsc -p .",
+    "build": "tsc -p . && node -e \"require('fs').cpSync('src/prompts','dist/prompts',{recursive:true})\"",
     "start": "node dist/index.js",
     "start:agent": "node dist/agent/index.js",
     "typecheck": "tsc --noEmit"

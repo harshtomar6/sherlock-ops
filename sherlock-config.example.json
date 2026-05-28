@@ -1,0 +1,6 @@
+{
+  "toolPacks": {
+    "pm2": true,
+    "shell": true
+  }
+}
