@@ -285,6 +285,9 @@ configure_control_plane() {
 
   if [[ -f sherlock-config.json ]]; then
     ok "keeping existing sherlock-config.json"
+    if ! grep -q '"skill-author"' sherlock-config.json; then
+      warn "add \"skill-author\" to the skills array in sherlock-config.json to let the bot write skills for itself"
+    fi
     if [[ $SELF_UPGRADE -eq 1 ]] && ! grep -q '"upgrade"' sherlock-config.json; then
       warn "add \"upgrade\" to the skills array in sherlock-config.json to finish enabling self-upgrade"
     fi
