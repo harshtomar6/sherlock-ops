@@ -69,6 +69,23 @@ if [[ "$INSTALL_DIR" != "/opt/sherlock-ops" ]]; then
   sed -i "s|/opt/sherlock-ops|$INSTALL_DIR|g" "$SERVICE_FILE"
 fi
 
+# ─── self-upgrade sudoers (opt-in) ───────────────────────────────────────
+# Allows the service user to run exactly deploy/upgrade.sh with no arguments,
+# so the bot's 'upgrade' skill can trigger a detached self-upgrade.
+if [[ "${SHERLOCK_SELF_UPGRADE:-0}" == "1" ]]; then
+  SUDOERS_FILE=/etc/sudoers.d/sherlock-ops-upgrade
+  chmod 755 "$INSTALL_DIR/deploy/upgrade.sh"
+  printf '%s ALL=(root) NOPASSWD: %s ""\n' "$SERVICE_USER" "$INSTALL_DIR/deploy/upgrade.sh" > "$SUDOERS_FILE.tmp"
+  chmod 440 "$SUDOERS_FILE.tmp"
+  if visudo -cf "$SUDOERS_FILE.tmp" >/dev/null; then
+    mv "$SUDOERS_FILE.tmp" "$SUDOERS_FILE"
+    echo "self-upgrade enabled ($SUDOERS_FILE)"
+  else
+    rm -f "$SUDOERS_FILE.tmp"
+    echo "generated sudoers rule failed validation — self-upgrade NOT enabled" >&2
+  fi
+fi
+
 # ─── enable + start ──────────────────────────────────────────────────────
 systemctl daemon-reload
 systemctl enable sherlock-ops

@@ -146,6 +146,55 @@ Tool-use quality varies a lot across models. Claude (Opus or Sonnet) and
 GPT-4-class models are the most reliable. Smaller models tend to struggle
 with multi-step investigations.
 
+## One-command install
+
+The installer handles everything — Node 20+ (via NodeSource if missing),
+clone/build, a guided `.env` setup, skills config, service user, and the
+systemd unit:
+
+```bash
+# control plane (also fine for single-host)
+curl -fsSL https://raw.githubusercontent.com/harshtomar6/sherlock-ops/main/install.sh | sudo bash
+
+# agent, on each target host
+curl -fsSL https://raw.githubusercontent.com/harshtomar6/sherlock-ops/main/install.sh | sudo bash -s -- --role agent
+```
+
+It prompts for secrets when run in a terminal. For unattended provisioning
+pass `--non-interactive` and provide the secrets as env vars
+(`SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `SLACK_SIGNING_SECRET`, an LLM key;
+agents: `SHERLOCK_CONTROL_URL`, `SHERLOCK_HOST_ID`, `SHERLOCK_AGENT_TOKEN`).
+Useful flags: `--dir`, `--repo` (your fork), `--ref` (branch/tag),
+`--help`. Re-running the same command upgrades in place — untracked config
+(`.env`, `hosts.json`, `sherlock-config.json`, `sherlock-skills/`, the audit
+DB) survives.
+
+The installer also offers **self-upgrade** (default off; pre-seed with
+`SHERLOCK_SELF_UPGRADE=1` for unattended installs). Opting in:
+
+- installs `/etc/sudoers.d/sherlock-*-upgrade`, allowing the service user to
+  run exactly `deploy/upgrade.sh` (root-owned, argument-less) and nothing
+  else — validated with `visudo -cf` before activation;
+- enables the built-in `upgrade` skill on the control plane, so
+  "@Sherlock upgrade yourself" checks the installed commit against the
+  remote and, after an in-thread approval, re-runs the installer in a
+  detached systemd unit (`systemd-run`) that survives the service
+  restarting beneath it. In multi-host mode each agent is upgraded the same
+  way by targeting its host.
+
+Trust implication: with self-upgrade enabled, whoever can push to the
+configured git ref effectively controls what runs as root on the box at the
+next upgrade. Point `--repo`/`--ref` at a repo and branch you control and
+protect it accordingly.
+
+Multi-host still needs `hosts.json` written by hand on the control plane
+(see [Multi-host: control plane](#multi-host-control-plane) step 3), then
+re-run the installer or `sudo bash deploy/install-control-plane.sh` to
+apply.
+
+The sections below do the same thing manually, for operators who want to
+see every step.
+
 ## Single-host deployment
 
 For one server. The control plane runs on the same machine as PM2.
@@ -159,6 +208,8 @@ npm run build
 cp .env.example .env
 # fill in Slack tokens and LLM provider key
 # Optionally: LOCAL_SHELL_ALLOWLIST=df -h,free -m,uptime,journalctl
+
+cp sherlock-config.example.json sherlock-config.json   # enable the pm2 skill
 ```
 
 Run it under a process manager so it restarts on crash. The simplest option
@@ -263,7 +314,13 @@ Or use systemd — see [deploy/systemd/sherlock-ops.service](../deploy/systemd/s
 
 ## Multi-host: deploying agents
 
-On each target host:
+On each target host, either use the one-liner:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/harshtomar6/sherlock-ops/main/install.sh | sudo bash -s -- --role agent
+```
+
+Or manually:
 
 ```bash
 git clone https://github.com/your-fork/sherlock-ops.git /opt/sherlock-agent
@@ -378,7 +435,7 @@ Bot: <table of processes>
 You: now check why the second one keeps restarting
 Bot: (knows what "the second one" refers to from prior turn)
 You: restart it
-Bot: (proposes pm2_restart with the right process name, asks for approval)
+Bot: (proposes `pm2 restart` with the right process name, asks for approval)
 ```
 
 **Knobs (in `.env`):**
@@ -428,11 +485,11 @@ Sample output during an investigation:
 
 ```json
 {"audit":"request","request_id":"abc-…","user":"slack:U01ABC","source":"slack","text":"why is api-server restarting?"}
-{"audit":"tool_call","request_id":"abc-…","seq":0,"name":"pm2_list","host":"api-prod-1","scope":"read","ok":true,"command":"pm2 jlist","exit_code":0,"duration_ms":42}
-{"audit":"tool_call","request_id":"abc-…","seq":1,"name":"pm2_logs","host":"api-prod-1","scope":"read","ok":true,"command":"pm2 logs api-server --lines 200 --nostream --raw --err","exit_code":0,"duration_ms":118}
-{"audit":"approval_requested","approval_id":"…","request_id":"abc-…","tool":"pm2_restart","scope":"mutate"}
+{"audit":"tool_call","request_id":"abc-…","seq":0,"name":"shell_exec","host":"api-prod-1","scope":"read","ok":true,"command":"pm2 jlist","exit_code":0,"duration_ms":42}
+{"audit":"tool_call","request_id":"abc-…","seq":1,"name":"shell_exec","host":"api-prod-1","scope":"read","ok":true,"command":"pm2 logs api-server --lines 200 --nostream --raw --err","exit_code":0,"duration_ms":118}
+{"audit":"approval_requested","approval_id":"…","request_id":"abc-…","tool":"shell_exec","scope":"dangerous"}
 {"audit":"approval_decided","approval_id":"…","approved":true,"decided_by":"slack:U01ABC"}
-{"audit":"tool_call","request_id":"abc-…","seq":2,"name":"pm2_restart","host":"api-prod-1","scope":"mutate","ok":true,"command":"pm2 restart api-server","exit_code":0,"duration_ms":1820}
+{"audit":"tool_call","request_id":"abc-…","seq":2,"name":"shell_exec","host":"api-prod-1","scope":"dangerous","ok":true,"command":"pm2 restart api-server","exit_code":0,"duration_ms":1820}
 {"audit":"response","request_id":"abc-…","ok":true,"duration_ms":5234,"llm_model":"claude-opus-4-7","input_tokens":12480,"output_tokens":520,"iterations":3,"final_stop_reason":"end"}
 ```
 
@@ -571,7 +628,8 @@ Run through this before going to production.
 **Authorization**
 - [ ] `shellAllowlist` on each host is genuinely minimal — only what's needed
 - [ ] No `rm`, `dd`, `mkfs`, `chmod`, `chown`, `mv`, `cp`, `tee`, `sh`, `bash`, `python`, `node` (and similar) on any allowlist
-- [ ] Mutating tools (`pm2_*`) gated by approval — verify in audit
+- [ ] Skill `allow` lists contain only read-only commands — mutations (e.g. `pm2 restart`) must stay approval-gated; verify in audit
+- [ ] If self-upgrade is enabled: `/etc/sudoers.d/sherlock-*-upgrade` targets only the root-owned `deploy/upgrade.sh` with `""` (no arguments), and the git repo/ref it pulls from is protected
 - [ ] At least two reviewers know how to read the audit log
 
 **Operational**
@@ -663,7 +721,7 @@ Failed at step EXEC spawning /usr/bin/node: No such file or directory
 `ExecStart=` in `/etc/systemd/system/sherlock-ops.service` (or re-run the
 install script, which detects the right path).
 
-### `pm2_list failed` but `pm2 ls` works on the host
+### `pm2 jlist` fails through Sherlock but `pm2 ls` works on the host
 
 Sherlock runs `pm2 jlist`, not `pm2 ls`. Check:
 
