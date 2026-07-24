@@ -277,9 +277,9 @@ configure_control_plane() {
     fi
   fi
 
-  local skills=(skill-author)
+  local skills=(audit skill-author)
   if confirm "Enable the built-in pm2 skill? (choose no for a bare bot)" Y; then
-    skills=(pm2 skill-author)
+    skills=(pm2 audit skill-author)
   fi
   [[ $SELF_UPGRADE -eq 1 ]] && skills+=(upgrade)
 
@@ -287,6 +287,9 @@ configure_control_plane() {
     ok "keeping existing sherlock-config.json"
     if ! grep -q '"skill-author"' sherlock-config.json; then
       warn "add \"skill-author\" to the skills array in sherlock-config.json to let the bot write skills for itself"
+    fi
+    if ! grep -q '"audit"' sherlock-config.json; then
+      warn "add \"audit\" to the skills array in sherlock-config.json to let the bot answer questions about its own history"
     fi
     if [[ $SELF_UPGRADE -eq 1 ]] && ! grep -q '"upgrade"' sherlock-config.json; then
       warn "add \"upgrade\" to the skills array in sherlock-config.json to finish enabling self-upgrade"

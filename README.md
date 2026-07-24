@@ -59,7 +59,7 @@ cd sherlock-ops
 npm ci
 cp .env.example .env
 # edit .env: Slack tokens (xoxb / xapp / signing) + an LLM key (e.g. OPENROUTER_API_KEY)
-cp sherlock-config.example.json sherlock-config.json   # enables the pm2 + skill-author skills
+cp sherlock-config.example.json sherlock-config.json   # enables the pm2, audit + skill-author skills
 npm run dev
 ```
 
@@ -116,6 +116,7 @@ configuration is always visible.
 Built-in skills (see `src/skills/builtin/`):
 
 - `pm2` — investigate and manage PM2-supervised processes.
+- `audit` — answers questions about the bot's own history ("what did you run yesterday?", "who approved that restart?", "how many tokens this week?") by querying the SQLite audit log through `node dist/audit/query.js` — a read-only-by-construction CLI (single SELECT/WITH statement, no ATTACH, row-capped), which is why it can be allowlisted where the raw `sqlite3` CLI never could (its dot-commands execute arbitrary programs).
 - `upgrade` — lets you ask the bot to upgrade itself ("@Sherlock upgrade yourself"). It checks the installed version (`BUILD_INFO`) against the remote, then — behind the usual Approve/Deny prompt — runs `deploy/upgrade.sh` via sudo, which rebuilds and restarts the service in a detached systemd unit. Requires opting into self-upgrade during install (that's what creates the restricted sudoers rule).
 - `skill-author` — lets the bot write new skills for itself. Describe a recurring workflow in Slack ("when the queue backs up, we always check…"), and Sherlock drafts a skill, shows you the full markdown for confirmation, then saves it through `node dist/skills/cli.js write` — an approval-gated call whose validation rejects `allow` entries that would bypass the approval flow (interpreters, file mutators, `sudo`, non-read-only `systemctl`, …). Skills reload on every request, so the new skill is active from the next message — no restart.
 
