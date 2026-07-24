@@ -105,6 +105,7 @@ function connect(): void {
           env: msg.env,
           timeoutMs: msg.timeoutMs,
           maxOutputBytes: msg.maxOutputBytes,
+          stdin: msg.stdin,
         });
         result.stdout = r.stdout;
         result.stderr = r.stderr;

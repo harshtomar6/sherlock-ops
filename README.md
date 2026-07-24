@@ -59,7 +59,7 @@ cd sherlock-ops
 npm ci
 cp .env.example .env
 # edit .env: Slack tokens (xoxb / xapp / signing) + an LLM key (e.g. OPENROUTER_API_KEY)
-cp sherlock-config.example.json sherlock-config.json   # enables the pm2 skill
+cp sherlock-config.example.json sherlock-config.json   # enables the pm2 + skill-author skills
 npm run dev
 ```
 
@@ -117,6 +117,7 @@ Built-in skills (see `src/skills/builtin/`):
 
 - `pm2` — investigate and manage PM2-supervised processes.
 - `upgrade` — lets you ask the bot to upgrade itself ("@Sherlock upgrade yourself"). It checks the installed version (`BUILD_INFO`) against the remote, then — behind the usual Approve/Deny prompt — runs `deploy/upgrade.sh` via sudo, which rebuilds and restarts the service in a detached systemd unit. Requires opting into self-upgrade during install (that's what creates the restricted sudoers rule).
+- `skill-author` — lets the bot write new skills for itself. Describe a recurring workflow in Slack ("when the queue backs up, we always check…"), and Sherlock drafts a skill, shows you the full markdown for confirmation, then saves it through `node dist/skills/cli.js write` — an approval-gated call whose validation rejects `allow` entries that would bypass the approval flow (interpreters, file mutators, `sudo`, non-read-only `systemctl`, …). Skills reload on every request, so the new skill is active from the next message — no restart.
 
 ### Writing a skill
 
@@ -173,7 +174,7 @@ and the hardening checklist — see **[docs/SELF_HOSTING.md](docs/SELF_HOSTING.m
 
 | | |
 |---|---|
-| `shell_exec` | The only tool. Runs argv-style commands via `spawn` (`shell: false` — no shell expansion). |
+| `shell_exec` | The only tool. Runs argv-style commands via `spawn` (`shell: false` — no shell expansion). Optional `stdin` pipes text to the command. |
 | Allowlists | Skill `allow` entries (all hosts) + per-host `shellAllowlist` are prefix-matched against the command. A match runs without approval. |
 | Approval | Any non-allowlisted command triggers Slack Approve/Deny before it runs. |
 | Skills | Markdown playbooks appended to the system prompt; they steer *what* the agent runs, allowlists control *whether it needs a human*. |

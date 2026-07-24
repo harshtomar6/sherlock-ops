@@ -13,6 +13,8 @@ export interface ExecOpts {
   env?: Record<string, string>;
   timeoutMs?: number;
   maxOutputBytes?: number;
+  /** Text written to the child's stdin. stdin is always closed after writing. */
+  stdin?: string;
 }
 
 export interface Executor {

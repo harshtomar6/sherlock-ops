@@ -169,7 +169,13 @@ Useful flags: `--dir`, `--repo` (your fork), `--ref` (branch/tag),
 (`.env`, `hosts.json`, `sherlock-config.json`, `sherlock-skills/`, the audit
 DB) survives.
 
-The installer also offers **self-upgrade** (default off; pre-seed with
+The installer enables the **skill-author** skill by default: the bot can
+save new skills for itself when you describe a workflow in Slack — each
+write is approval-gated, validated, and lands in `sherlock-skills/` where
+you can review or edit it. Remove `"skill-author"` from
+`sherlock-config.json` to turn it off.
+
+It also offers **self-upgrade** (default off; pre-seed with
 `SHERLOCK_SELF_UPGRADE=1` for unattended installs). Opting in:
 
 - installs `/etc/sudoers.d/sherlock-*-upgrade`, allowing the service user to
@@ -629,6 +635,7 @@ Run through this before going to production.
 - [ ] `shellAllowlist` on each host is genuinely minimal — only what's needed
 - [ ] No `rm`, `dd`, `mkfs`, `chmod`, `chown`, `mv`, `cp`, `tee`, `sh`, `bash`, `python`, `node` (and similar) on any allowlist
 - [ ] Skill `allow` lists contain only read-only commands — mutations (e.g. `pm2 restart`) must stay approval-gated; verify in audit
+- [ ] If skill-author is enabled: review `sherlock-skills/` periodically — every bot-written skill went through an approval, but the `allow` lists it added are now standing policy
 - [ ] If self-upgrade is enabled: `/etc/sudoers.d/sherlock-*-upgrade` targets only the root-owned `deploy/upgrade.sh` with `""` (no arguments), and the git repo/ref it pulls from is protected
 - [ ] At least two reviewers know how to read the audit log
 

@@ -63,6 +63,8 @@ export interface ServerExec {
   env?: Record<string, string>;
   timeoutMs?: number;
   maxOutputBytes?: number;
+  /** Text piped to the command's stdin. Additive since protocol v1 — older agents ignore it. */
+  stdin?: string;
 }
 
 export interface ServerPing {

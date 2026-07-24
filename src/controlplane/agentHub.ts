@@ -109,6 +109,7 @@ export class AgentHub {
         env: opts.env,
         timeoutMs,
         maxOutputBytes: opts.maxOutputBytes,
+        stdin: opts.stdin,
       };
       conn.ws.send(JSON.stringify(msg));
     });

@@ -37,6 +37,11 @@ export class LocalExecutor implements Executor {
       child.stdout.on("data", onData("out"));
       child.stderr.on("data", onData("err"));
 
+      // Close stdin either way — commands that read it must not hang until
+      // the timeout. EPIPE from children that never read is expected.
+      child.stdin.on("error", () => {});
+      child.stdin.end(opts.stdin ?? "");
+
       const timer = setTimeout(() => {
         child.kill("SIGTERM");
       }, timeoutMs);

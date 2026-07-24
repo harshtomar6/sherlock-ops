@@ -61,17 +61,30 @@ async function main(): Promise<void> {
   }
 
   const prompt = loadSystemPrompt();
-  const skills = loadSkills(loadEnabledSkillNames());
-  const skillAllow = skills.flatMap((s) => s.allow);
+  // Skills reload per request so self-authored skills (skill-author) apply
+  // without a restart. A reload failure keeps the last good set.
+  let skills = loadSkills(loadEnabledSkillNames());
+  const refreshSkills = () => {
+    try {
+      skills = loadSkills(loadEnabledSkillNames());
+    } catch (err) {
+      console.error(JSON.stringify({
+        component: "skills",
+        event: "reload_failed",
+        error: err instanceof Error ? err.message : String(err),
+      }));
+    }
+    return skills;
+  };
 
   const registry = new ToolRegistry();
-  registry.registerAll(buildShellTools(resolver, skillAllow));
+  registry.registerAll(buildShellTools(resolver, () => skills.flatMap((s) => s.allow)));
 
   const orchestrator = new Orchestrator({
     llm,
     registry,
     conversations,
-    systemPrompt: composeSystemPrompt(prompt.text, skills),
+    systemPrompt: () => composeSystemPrompt(prompt.text, refreshSkills()),
   });
   const gateway = new Gateway({ orchestrator, audit, allowedUsers: cfg.allowedUsers });
 
@@ -93,7 +106,7 @@ async function main(): Promise<void> {
       llm: cfg.llm.kind === "anthropic" ? `anthropic:${cfg.llm.model}` : `openai-compat:${cfg.llm.baseUrl}:${cfg.llm.model}`,
       promptSource: prompt.source,
       skills: skills.map((s) => ({ name: s.name, source: s.source })),
-      skillAllow,
+      skillAllow: skills.flatMap((s) => s.allow),
       tools: registry.toProviderDefs().map((t) => t.name),
       hubPort: cfg.hostsCfg?.port,
       auditDb: cfg.auditDbPath,

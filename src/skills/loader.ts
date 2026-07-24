@@ -44,10 +44,7 @@ const frontmatterSchema = z
  */
 export function loadSkills(names: string[]): Skill[] {
   assertUnique(names);
-  const skillsDir = resolve(
-    process.cwd(),
-    process.env.SHERLOCK_SKILLS_DIR ?? "sherlock-skills",
-  );
+  const skillsDir = operatorSkillsDir();
   const builtinDir = builtinSkillsDir();
 
   return names.map((name) => {
@@ -57,12 +54,12 @@ export function loadSkills(names: string[]): Skill[] {
     const operatorPath = resolve(skillsDir, `${name}.md`);
     const operatorRaw = tryRead(operatorPath);
     if (operatorRaw !== undefined) {
-      return parseSkill(name, operatorRaw, operatorPath);
+      return parseSkillFile(name, operatorRaw, operatorPath);
     }
     const builtinPath = resolve(builtinDir, `${name}.md`);
     const builtinRaw = tryRead(builtinPath);
     if (builtinRaw !== undefined) {
-      return parseSkill(name, builtinRaw, `builtin:${name}.md`);
+      return parseSkillFile(name, builtinRaw, `builtin:${name}.md`);
     }
     throw new Error(
       `skill '${name}' not found — looked for ${operatorPath} and builtin ${name}.md`,
@@ -87,7 +84,8 @@ export function composeSystemPrompt(base: string, skills: Skill[]): string {
   ].join("\n\n");
 }
 
-function parseSkill(name: string, raw: string, source: string): Skill {
+/** Parse and validate a skill file's raw content. Exported for the skills CLI. */
+export function parseSkillFile(name: string, raw: string, source: string): Skill {
   const { frontmatter, body } = splitFrontmatter(raw, source);
   let parsedYaml: unknown;
   try {
@@ -131,7 +129,11 @@ function splitFrontmatter(
   };
 }
 
-function builtinSkillsDir(): string {
+export function operatorSkillsDir(): string {
+  return resolve(process.cwd(), process.env.SHERLOCK_SKILLS_DIR ?? "sherlock-skills");
+}
+
+export function builtinSkillsDir(): string {
   const here = dirname(fileURLToPath(import.meta.url));
   // src/skills/loader.ts  -> src/skills/builtin
   // dist/skills/loader.js -> dist/skills/builtin (after postbuild copy)

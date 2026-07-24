@@ -6,8 +6,13 @@ import { defineTool, type Tool, type ToolScope } from "./types.js";
  * The single execution primitive. `skillAllow` carries command prefixes the
  * enabled skills vouch for as safe reads — merged with the per-host
  * allowlist so skill commands (e.g. `pm2 jlist`) run without approval.
+ * Pass a function to keep the allowlist live across skill reloads.
  */
-export function buildShellTools(resolver: HostResolver, skillAllow: string[] = []): Tool[] {
+export function buildShellTools(
+  resolver: HostResolver,
+  skillAllow: string[] | (() => string[]) = [],
+): Tool[] {
+  const currentSkillAllow = () => (typeof skillAllow === "function" ? skillAllow() : skillAllow);
   const multi = resolver.isMultiHost();
   const known = resolver.knownHosts();
   const hostSchema = multi
@@ -27,20 +32,23 @@ export function buildShellTools(resolver: HostResolver, skillAllow: string[] = [
       schema: z.object({
         host: hostSchema,
         command: z.string().describe("Full command line including arguments, e.g. 'df -h /var'"),
+        stdin: z.string().max(256_000).optional()
+          .describe("Text piped to the command's standard input"),
         timeoutMs: z.number().int().min(1000).max(120_000).default(30_000),
       }).strict(),
       evaluateScope: (args): ToolScope => {
         const a = args as { host?: string; command: string };
-        const allowlist = [...skillAllow, ...resolver.shellAllowlistFor(a.host)];
+        const allowlist = [...currentSkillAllow(), ...resolver.shellAllowlistFor(a.host)];
         return isAllowlisted(tokenize(a.command), allowlist) ? "read" : "dangerous";
       },
-      run: async ({ host, command, timeoutMs }) => {
+      run: async ({ host, command, stdin, timeoutMs }) => {
         const argv = tokenize(command);
         if (argv.length === 0) throw new Error("empty command");
         const [bin, ...args] = argv;
         const r = await resolver.resolve(host as string | undefined).exec({
           command: bin!,
           args,
+          stdin,
           timeoutMs,
         });
         return {

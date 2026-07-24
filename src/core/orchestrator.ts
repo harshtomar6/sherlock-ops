@@ -17,8 +17,11 @@ const MAX_TOOL_ITERATIONS = 10;
 export interface OrchestratorOpts {
   llm: LLMProvider;
   registry: ToolRegistry;
-  /** System prompt sent on every LLM turn. Loaded from config at boot. */
-  systemPrompt: string;
+  /**
+   * System prompt sent on every LLM turn. Pass a function to recompose it
+   * per request (e.g. so skill changes apply without a restart).
+   */
+  systemPrompt: string | (() => string);
   maxIterations?: number;
   conversations?: ConversationStore;
 }
@@ -31,7 +34,7 @@ export interface OrchestratorContext {
 export class Orchestrator {
   private llm: LLMProvider;
   private registry: ToolRegistry;
-  private systemPrompt: string;
+  private systemPrompt: string | (() => string);
   private maxIterations: number;
   private conversations?: ConversationStore;
 
@@ -51,6 +54,9 @@ export class Orchestrator {
 
     const toolDefs = this.registry.toProviderDefs();
     const broker = req.approvalBroker ?? new DenyAllBroker();
+    // Resolve once per request so every iteration of this turn sees the same prompt.
+    const systemPrompt =
+      typeof this.systemPrompt === "function" ? this.systemPrompt() : this.systemPrompt;
 
     let lastAssistantText = "";
     let hitMax = false;
@@ -65,7 +71,7 @@ export class Orchestrator {
 
     for (let i = 0; i < this.maxIterations; i++) {
       const resp = await this.llm.chat({
-        system: this.systemPrompt,
+        system: systemPrompt,
         messages,
         tools: toolDefs,
       });

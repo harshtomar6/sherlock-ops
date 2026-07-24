@@ -277,9 +277,9 @@ configure_control_plane() {
     fi
   fi
 
-  local skills=()
+  local skills=(skill-author)
   if confirm "Enable the built-in pm2 skill? (choose no for a bare bot)" Y; then
-    skills+=(pm2)
+    skills=(pm2 skill-author)
   fi
   [[ $SELF_UPGRADE -eq 1 ]] && skills+=(upgrade)
 

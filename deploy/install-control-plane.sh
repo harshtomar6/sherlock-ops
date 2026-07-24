@@ -52,6 +52,14 @@ if [[ -f "$INSTALL_DIR/hosts.json" ]]; then
   chmod 600 "$INSTALL_DIR/hosts.json"
 fi
 
+# Skills config + operator skills dir must exist and be writable by the
+# service user (the skill-author skill writes here; the unit's
+# ReadWritePaths references both and fails at start if they're missing).
+[[ -f "$INSTALL_DIR/sherlock-config.json" ]] || printf '{\n  "skills": []\n}\n' > "$INSTALL_DIR/sherlock-config.json"
+chown "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR/sherlock-config.json"
+mkdir -p "$INSTALL_DIR/sherlock-skills"
+chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR/sherlock-skills"
+
 # ─── install unit ────────────────────────────────────────────────────────
 cp "$INSTALL_DIR/deploy/systemd/sherlock-ops.service" "$SERVICE_FILE"
 

@@ -15,6 +15,12 @@ WorkingDirectory=/opt/sherlock-ops
 StateDirectory=sherlock-ops
 StateDirectoryMode=0750
 
+# The only writable app paths: self-authored skills (skill-author) and the
+# skills config. Both are created by the install script — they must exist
+# or the unit fails at namespace setup.
+ReadWritePaths=/opt/sherlock-ops/sherlock-skills
+ReadWritePaths=/opt/sherlock-ops/sherlock-config.json
+
 # Load secrets from .env (mode 0600, owned by sherlock:sherlock).
 EnvironmentFile=/opt/sherlock-ops/.env
 Environment=NODE_ENV=production
