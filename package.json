@@ -1,7 +1,7 @@
 {
   "name": "sherlock-ops",
   "version": "0.0.1",
-  "description": "AI-powered ops bot for PM2, logs, and shell — Slack-first, multi-interface.",
+  "description": "AI-powered ops bot with skill-based playbooks over a single shell primitive — Slack-first, multi-interface.",
   "license": "MIT",
   "type": "module",
   "engines": {
@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "dev:agent": "tsx watch src/agent/index.ts",
-    "build": "tsc -p . && node -e \"require('fs').cpSync('src/prompts','dist/prompts',{recursive:true})\"",
+    "build": "tsc -p . && node -e \"const fs=require('fs');fs.cpSync('src/prompts','dist/prompts',{recursive:true});fs.cpSync('src/skills/builtin','dist/skills/builtin',{recursive:true})\"",
     "start": "node dist/index.js",
     "start:agent": "node dist/agent/index.js",
     "typecheck": "tsc --noEmit"

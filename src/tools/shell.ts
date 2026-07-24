@@ -2,7 +2,12 @@ import { z } from "zod";
 import type { HostResolver } from "../executor/hostResolver.js";
 import { defineTool, type Tool, type ToolScope } from "./types.js";
 
-export function buildShellTools(resolver: HostResolver): Tool[] {
+/**
+ * The single execution primitive. `skillAllow` carries command prefixes the
+ * enabled skills vouch for as safe reads — merged with the per-host
+ * allowlist so skill commands (e.g. `pm2 jlist`) run without approval.
+ */
+export function buildShellTools(resolver: HostResolver, skillAllow: string[] = []): Tool[] {
   const multi = resolver.isMultiHost();
   const known = resolver.knownHosts();
   const hostSchema = multi
@@ -13,7 +18,7 @@ export function buildShellTools(resolver: HostResolver): Tool[] {
     defineTool({
       name: "shell_exec",
       description: [
-        "Run an arbitrary shell command on the target host. Argv-style — quote args.",
+        "Run a shell command on the target host. Argv-style — quote args.",
         "Allowlisted commands run without approval; everything else requires human approval.",
         "Use for diagnostics like 'df -h', 'free -m', 'uptime', 'journalctl', 'top -bn1', etc.",
         "Do NOT use this for destructive operations (rm, dd, mkfs) — those will be denied even with approval unless an admin has explicitly approved.",
@@ -26,7 +31,7 @@ export function buildShellTools(resolver: HostResolver): Tool[] {
       }).strict(),
       evaluateScope: (args): ToolScope => {
         const a = args as { host?: string; command: string };
-        const allowlist = resolver.shellAllowlistFor(a.host);
+        const allowlist = [...skillAllow, ...resolver.shellAllowlistFor(a.host)];
         return isAllowlisted(tokenize(a.command), allowlist) ? "read" : "dangerous";
       },
       run: async ({ host, command, timeoutMs }) => {

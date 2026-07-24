@@ -1,9 +1,8 @@
 import { SlackAdapter } from "./adapters/slack.js";
 import { AuditStore } from "./audit/store.js";
 import { loadConfig, type LlmCfg } from "./config.js";
-import { loadCustomTools } from "./config/customTools.js";
 import { loadSystemPrompt } from "./config/prompt.js";
-import { enabledPackNames, loadToolPacks } from "./config/toolPacks.js";
+import { loadEnabledSkillNames } from "./config/skills.js";
 import { AgentHub } from "./controlplane/agentHub.js";
 import { ConversationStore } from "./core/conversationStore.js";
 import { Gateway } from "./core/gateway.js";
@@ -17,8 +16,7 @@ import {
 import { AnthropicProvider } from "./llm/anthropic.js";
 import { OpenAIProvider } from "./llm/openai.js";
 import type { LLMProvider } from "./llm/types.js";
-import { buildDeclarativeTools } from "./tools/declarative.js";
-import { buildPm2Tools } from "./tools/pm2.js";
+import { composeSystemPrompt, loadSkills } from "./skills/loader.js";
 import { buildShellTools } from "./tools/shell.js";
 
 const CONTROL_PLANE_VERSION = "0.3.0";
@@ -63,21 +61,17 @@ async function main(): Promise<void> {
   }
 
   const prompt = loadSystemPrompt();
-  const packs = loadToolPacks();
-  const customTools = loadCustomTools();
+  const skills = loadSkills(loadEnabledSkillNames());
+  const skillAllow = skills.flatMap((s) => s.allow);
 
   const registry = new ToolRegistry();
-  if (packs.pm2) registry.registerAll(buildPm2Tools(resolver));
-  if (packs.shell) registry.registerAll(buildShellTools(resolver));
-  if (customTools.declarations.length > 0) {
-    registry.registerAll(buildDeclarativeTools(customTools.declarations, resolver));
-  }
+  registry.registerAll(buildShellTools(resolver, skillAllow));
 
   const orchestrator = new Orchestrator({
     llm,
     registry,
     conversations,
-    systemPrompt: prompt.text,
+    systemPrompt: composeSystemPrompt(prompt.text, skills),
   });
   const gateway = new Gateway({ orchestrator, audit, allowedUsers: cfg.allowedUsers });
 
@@ -98,9 +92,8 @@ async function main(): Promise<void> {
       controlPlaneAddressable: cfg.hostsCfg?.controlPlane?.id,
       llm: cfg.llm.kind === "anthropic" ? `anthropic:${cfg.llm.model}` : `openai-compat:${cfg.llm.baseUrl}:${cfg.llm.model}`,
       promptSource: prompt.source,
-      enabledPacks: enabledPackNames(packs),
-      customToolsSource: customTools.source,
-      customTools: customTools.declarations.map((d) => d.name),
+      skills: skills.map((s) => ({ name: s.name, source: s.source })),
+      skillAllow,
       tools: registry.toProviderDefs().map((t) => t.name),
       hubPort: cfg.hostsCfg?.port,
       auditDb: cfg.auditDbPath,
